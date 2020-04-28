@@ -2,7 +2,6 @@ package orm
 
 import (
 	"reflect"
-	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -11,36 +10,22 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-var (
-	MgoSet         OperatorUpdate = "$set"
-	MgoUnSet       OperatorUpdate = "$unset"
-	MgoInc         OperatorUpdate = "$inc"
-	MgoPush        OperatorUpdate = "$push"
-	MgoPushAll     OperatorUpdate = "$pushAll"
-	MgoAddToSet    OperatorUpdate = "$addToSet"
-	MgoPop         OperatorUpdate = "$pop"
-	MgoPull        OperatorUpdate = "$pull"
-	MgoPullAll     OperatorUpdate = "$pullAll"
-	MgoRename      OperatorUpdate = "$rename"
-	MgoSetOnInsert OperatorUpdate = "$setOnInsert"
-)
-
 // mysql dbBaser implementation.
-type dbBaseMongo struct {
+type dbBaseClickHouse struct {
 	dbBase
 }
 
-var _ dbBaser = new(dbBaseMongo)
+var _ dbBaser = new(dbBaseClickHouse)
 
 // create new mysql dbBaser.
-func newdbBaseMongo() dbBaser {
-	b := new(dbBaseMongo)
+func newdbBaseClickHouse() dbBaser {
+	b := new(dbBaseClickHouse)
 	b.ins = b
 	return b
 }
 
 // read one record.
-func (d *dbBaseMongo) FindOne(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condition, container interface{}, tz *time.Location, cols []string) (err error) {
+func (d *dbBaseClickHouse) FindOne(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condition, container interface{}, tz *time.Location, cols []string) (err error) {
 	db := qs.orm.db.(*DB).MDB
 	col := db.Collection(mi.table)
 	opt := options.FindOne()
@@ -72,7 +57,7 @@ func (d *dbBaseMongo) FindOne(q dbQuerier, qs *querySet, mi *modelInfo, cond *Co
 }
 
 // read one record.
-func (d *dbBaseMongo) Distinct(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condition, tz *time.Location, field string) (res []interface{}, err error) {
+func (d *dbBaseClickHouse) Distinct(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condition, tz *time.Location, field string) (res []interface{}, err error) {
 	db := qs.orm.db.(*DB).MDB
 	col := db.Collection(mi.table)
 	opt := options.Distinct()
@@ -87,7 +72,7 @@ func (d *dbBaseMongo) Distinct(q dbQuerier, qs *querySet, mi *modelInfo, cond *C
 }
 
 // read all records.
-func (d *dbBaseMongo) ReadBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condition, container interface{}, tz *time.Location, cols []string) (err error) {
+func (d *dbBaseClickHouse) ReadBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condition, container interface{}, tz *time.Location, cols []string) (err error) {
 	db := qs.orm.db.(*DB).MDB
 	col := db.Collection(mi.table)
 
@@ -131,7 +116,7 @@ func (d *dbBaseMongo) ReadBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *
 }
 
 // get the recodes count.
-func (d *dbBaseMongo) Count(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condition, tz *time.Location) (i int64, err error) {
+func (d *dbBaseClickHouse) Count(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condition, tz *time.Location) (i int64, err error) {
 	db := qs.orm.db.(*DB).MDB
 	col := db.Collection(mi.table)
 
@@ -158,7 +143,7 @@ func (d *dbBaseMongo) Count(q dbQuerier, qs *querySet, mi *modelInfo, cond *Cond
 }
 
 // update the recodes.
-func (d *dbBaseMongo) UpdateBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condition, operator OperatorUpdate, params Params, tz *time.Location) (i int64, err error) {
+func (d *dbBaseClickHouse) UpdateBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condition, operator OperatorUpdate, params Params, tz *time.Location) (i int64, err error) {
 	db := qs.orm.db.(*DB).MDB
 	col := db.Collection(mi.table)
 
@@ -193,7 +178,7 @@ func (d *dbBaseMongo) UpdateBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond
 }
 
 // delete the recodes.
-func (d *dbBaseMongo) DeleteBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condition, tz *time.Location) (i int64, err error) {
+func (d *dbBaseClickHouse) DeleteBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condition, tz *time.Location) (i int64, err error) {
 	db := qs.orm.db.(*DB).MDB
 	col := db.Collection(mi.table)
 
@@ -218,7 +203,7 @@ func (d *dbBaseMongo) DeleteBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond
 }
 
 // read one record.
-func (d *dbBaseMongo) Read(q dbQuerier, mi *modelInfo, ind reflect.Value, container interface{}, tz *time.Location, cols []string, isForUpdate bool) (err error) {
+func (d *dbBaseClickHouse) Read(q dbQuerier, mi *modelInfo, ind reflect.Value, container interface{}, tz *time.Location, cols []string, isForUpdate bool) (err error) {
 	db := q.(*DB).MDB
 	col := db.Collection(mi.table)
 
@@ -257,7 +242,7 @@ func (d *dbBaseMongo) Read(q dbQuerier, mi *modelInfo, ind reflect.Value, contai
 }
 
 // insert one record.
-func (d *dbBaseMongo) InsertOne(q dbQuerier, mi *modelInfo, ind reflect.Value, container interface{}, tz *time.Location) (id interface{}, err error) {
+func (d *dbBaseClickHouse) InsertOne(q dbQuerier, mi *modelInfo, ind reflect.Value, container interface{}, tz *time.Location) (id interface{}, err error) {
 	db := q.(*DB).MDB
 	col := db.Collection(mi.table)
 	_, _, b := getExistPk(mi, ind)
@@ -279,7 +264,7 @@ func (d *dbBaseMongo) InsertOne(q dbQuerier, mi *modelInfo, ind reflect.Value, c
 }
 
 // insert all records.
-func (d *dbBaseMongo) InsertMulti(q dbQuerier, mi *modelInfo, ind reflect.Value, bulk int, containers interface{}, tz *time.Location) (ids interface{}, err error) {
+func (d *dbBaseClickHouse) InsertMulti(q dbQuerier, mi *modelInfo, ind reflect.Value, bulk int, containers interface{}, tz *time.Location) (ids interface{}, err error) {
 	db := q.(*DB).MDB
 	col := db.Collection(mi.table)
 	_, _, b := getExistPk(mi, ind)
@@ -308,7 +293,7 @@ func (d *dbBaseMongo) InsertMulti(q dbQuerier, mi *modelInfo, ind reflect.Value,
 }
 
 // update one record.
-func (d *dbBaseMongo) Update(q dbQuerier, mi *modelInfo, ind reflect.Value, tz *time.Location, cols []string) (id interface{}, err error) {
+func (d *dbBaseClickHouse) Update(q dbQuerier, mi *modelInfo, ind reflect.Value, tz *time.Location, cols []string) (id interface{}, err error) {
 	db := q.(*DB).MDB
 	col := db.Collection(mi.table)
 	c, val, b := getExistPk(mi, ind)
@@ -351,7 +336,7 @@ func (d *dbBaseMongo) Update(q dbQuerier, mi *modelInfo, ind reflect.Value, tz *
 }
 
 // delete one record.
-func (d *dbBaseMongo) Delete(q dbQuerier, mi *modelInfo, ind reflect.Value, tz *time.Location, cols []string) (cnt interface{}, err error) {
+func (d *dbBaseClickHouse) Delete(q dbQuerier, mi *modelInfo, ind reflect.Value, tz *time.Location, cols []string) (cnt interface{}, err error) {
 	db := q.(*DB).MDB
 	col := db.Collection(mi.table)
 
@@ -386,101 +371,9 @@ func (d *dbBaseMongo) Delete(q dbQuerier, mi *modelInfo, ind reflect.Value, tz *
 }
 
 // get indexview.
-func (d *dbBaseMongo) Indexes(qs *querySet, mi *modelInfo, tz *time.Location) (iv IndexViewer) {
+func (d *dbBaseClickHouse) Indexes(qs *querySet, mi *modelInfo, tz *time.Location) (iv IndexViewer) {
 	db := qs.orm.db.(*DB).MDB
 	col := db.Collection(mi.table)
 
 	return newIndexView(col.Indexes())
-}
-
-func convertCondition(cond *Condition) (filter bson.M) {
-	filter = bson.M{}
-	if cond == nil {
-		return
-	}
-	for i, p := range cond.params {
-		if p.isCond {
-			f := convertCondition(p.cond)
-			if i > 0 {
-				if p.isOr {
-					filter = bson.M{
-						"$or": bson.A{filter, f},
-					}
-				} else {
-					// where += "AND "
-					filter = bson.M{
-						"$and": bson.A{filter, f},
-					}
-				}
-			} else {
-				filter = f
-			}
-
-		} else {
-			exprs := p.exprs
-
-			num := len(exprs) - 1
-			operator := ""
-			if operators[exprs[num]] {
-				operator = exprs[num]
-				exprs = exprs[:num]
-			}
-
-			if operator == "" {
-				operator = "eq"
-			}
-
-			k, v := getCond(exprs, p.args, operator)
-
-			if i > 0 {
-				if p.isOr {
-					filter = bson.M{
-						"$or": bson.A{filter, bson.M{k: v}},
-					}
-				} else {
-					// where += "AND "
-					filter[k] = v
-				}
-			} else {
-				filter[k] = v
-			}
-
-		}
-
-	}
-	return
-}
-
-func getCond(params []string, args []interface{}, operator string) (k string, v interface{}) {
-	k = strings.Join(params, ".")
-	if len(args) == 0 {
-		v = bson.M{}
-	} else if len(args) == 1 {
-		v = bson.M{
-			"$" + operator: args[0],
-		}
-	} else {
-		v = bson.M{
-			"$" + operator: args,
-		}
-	}
-
-	return
-}
-
-func getSort(orders []string) (r bson.M) {
-	r = bson.M{}
-	if len(orders) == 0 {
-		return
-	}
-	for _, order := range orders {
-		if order[0] == '-' {
-			order = order[1:]
-			r[order] = -1
-		} else {
-			r[order] = 1
-		}
-	}
-
-	return
 }

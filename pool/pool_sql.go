@@ -2,27 +2,50 @@ package pool
 
 import (
 	"context"
+	"database/sql"
 	"time"
-
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
 
-func RegisterMgoPool(poolName string, url string, force bool, params ...int) (err error) {
+type DriverType int
+
+// Enum the Database driver
+const (
+	_            DriverType = iota // int enum type
+	DRMySQL                        // mysql
+	DRSqlite                       // sqlite
+	DROracle                       // oracle
+	DRPostgres                     // pgsql
+	DRTiDB                         // TiDB
+	DRMongo                        // MongoDB
+	DRClickHouse                   // ClickHouse
+)
+
+var (
+	driversName = map[DriverType]string{
+		DRMySQL:      "mysql",
+		DRSqlite:     "sqlite3",
+		DROracle:     "oracle",
+		DRPostgres:   "postgres",
+		DRTiDB:       "tidb",
+		DRMongo:      "mongo",
+		DRClickHouse: "clickhouse",
+	}
+)
+
+func RegisterSqlPool(poolName string, t int, url string, force bool, params ...int) (err error) {
 	//factory 创建连接的方法
 	factory := func() (interface{}, error) {
-		return mongo.Connect(context.Background(), options.Client().ApplyURI(url))
+		return sql.Open(driversName[DriverType(t)], url)
 	}
 
 	//close 关闭连接的方法
 	close := func(v interface{}) error {
-		return v.(*mongo.Client).Disconnect(context.Background())
+		return v.(*sql.DB).Close()
 	}
 
 	//ping 检测连接的方法
 	ping := func(v interface{}) error {
-		return v.(*mongo.Client).Ping(context.Background(), readpref.Primary())
+		return v.(*sql.DB).PingContext(context.Background())
 	}
 
 	var (

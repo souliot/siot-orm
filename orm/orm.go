@@ -79,7 +79,7 @@ func (o *orm) ReadOrCreate(md interface{}, col1 string, cols ...string) (created
 	cols = append([]string{col1}, cols...)
 	mi, ind := o.getMiInd(md, true)
 	err = o.alias.DbBaser.Read(o.db, mi, ind, md, o.alias.TZ, cols, false)
-	if err == mongo.ErrNoDocuments {
+	if err == mongo.ErrNoDocuments || err == ErrNoRows {
 		// Create
 		id, err = o.Insert(md)
 		return (err == nil), id, err

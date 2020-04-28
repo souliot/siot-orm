@@ -2,22 +2,14 @@ package orm
 
 import (
 	"testing"
-	"time"
 
-	"github.com/astaxie/beego/logs"
+	_ "github.com/ClickHouse/clickhouse-go"
 )
 
 type Logs struct {
-	Ids      string `bson:"_id"`
+	Id       string `orm:"pk" bson:"id"`
 	Ltype    string `orm:"column(type)" bson:"type"`
 	UserName string `orm:"column(username)"  bson:"username"`
-	L2       *Logs2 `bson:"l2"`
-}
-
-type Logs2 struct {
-	Id       int    `bson:"_id"`
-	Ltype    string `orm:"column(type)" bson:"type"`
-	UserName string `orm:"column(username)" bson:"username"`
 }
 
 func (m *Logs) TableName() string {
@@ -25,19 +17,21 @@ func (m *Logs) TableName() string {
 }
 
 func init() {
-	logs.SetLogFuncCall(true)
 
 	RegisterModel(new(Logs))
-	RegisterModel(new(Logs2))
 
-	RegisterDriver("mongo", DRMongo, true)
-	RegisterDataBase("default", "mongo", "mongodb://yapi:abcd1234@192.168.50.200:27017/yapi", true)
+	// RegisterDriver("mongo", DRMongo)
+	// RegisterDataBase("default", "mongo", "mongodb://yapi:abcd1234@192.168.50.200:27017/yapi", true)
+	RegisterDriver("clickhouse", DRClickHouse)
+	RegisterDataBase("default", "clickhouse", "tcp://192.168.0.8:9000?username=default&password=watrix888&database=test&read_timeout=10&write_timeout=20", true)
+	// RegisterDataBase("default", "mysql", "root:watrix@/businessserver?charset=utf8", true)
 	// RegisterDataBase("default", "mongo", "mongodb://yapi:abcd1234@vm:27017/yapi")
 
 }
 
 var (
 	l = Logs{
+		Id:       "asd",
 		UserName: "linleizhou1234",
 		Ltype:    "group",
 	}
@@ -48,14 +42,14 @@ func TestRead(t *testing.T) {
 	o.Using("default")
 
 	err := o.Read(&l, "UserName")
-	logs.Info(err, l)
+	t.Log(err, l)
 }
 func TestReadOrCreate(t *testing.T) {
 	o := NewOrm()
 	o.Using("default")
 
 	c, id, err := o.ReadOrCreate(&l, "UserName")
-	logs.Info(c, id, err, l)
+	t.Log(c, id, err, l)
 }
 
 func TestInsert(t *testing.T) {
@@ -63,7 +57,7 @@ func TestInsert(t *testing.T) {
 	o.Using("default")
 
 	id, err := o.Insert(&l)
-	logs.Info(id, err)
+	t.Log(id, err)
 }
 
 func TestInsertMulti(t *testing.T) {
@@ -74,27 +68,27 @@ func TestInsertMulti(t *testing.T) {
 	ls = append(ls, l)
 	ls = append(ls, l)
 	id, err := o.InsertMulti(100, ls)
-	logs.Info(id, err)
+	t.Log(id, err)
 }
 
 func TestUpdate(t *testing.T) {
 	o := NewOrm()
 	o.Using("default")
 
-	l.Ids = "5e7431f78c1b4111312cce2d"
+	l.Id = "asd"
 	l.Ltype = "group3"
 	id, err := o.Update(&l, "Ltype")
-	logs.Info(id, err, l)
+	t.Log(id, err, l)
 }
 
 func TestDelete(t *testing.T) {
 	o := NewOrm()
 	o.Using("default")
 
-	l.Ids = "5e71816fee8b0d2ba0d24939"
+	l.Id = "asd"
 	l.Ltype = "group3"
 	cnt, err := o.Delete(&l, "Ltype")
-	logs.Info(cnt, err)
+	t.Log(cnt, err)
 }
 
 func TestQsOne(t *testing.T) {
@@ -102,8 +96,8 @@ func TestQsOne(t *testing.T) {
 	o.Using("default")
 
 	qs := o.QueryTable("log")
-	err := qs.Filter("username", "linleizhou1234").One(&l, "username", "type")
-	logs.Info(err, l)
+	err := qs.Filter("username", "asda").One(&l, "username", "type")
+	t.Log(err, l)
 }
 
 func TestQsAll(t *testing.T) {
@@ -111,10 +105,9 @@ func TestQsAll(t *testing.T) {
 	o.Using("default")
 	var ls []Logs
 	qs := o.QueryTable("log")
-	err := qs.Filter("username__regex", "linleizhou").OrderBy("-_id", "Ltype").Limit(2, 0).All(&ls)
+	err := qs.Filter("username__contains", "as").OrderBy("-id", "Ltype").Limit(2, 0).All(&ls)
 	// num, err := qs.All(&ls)
-	logs.Info(err)
-	logs.Info(ls)
+	t.Log(err, ls)
 }
 
 func TestQsCount(t *testing.T) {
@@ -122,9 +115,9 @@ func TestQsCount(t *testing.T) {
 	o.Using("default")
 
 	qs := o.QueryTable("log")
-	num, err := qs.Filter("username", "linleizhou1234").Count()
+	num, err := qs.Filter("username__contains", "as").Count()
 	// num, err := qs.Count()
-	logs.Info(num, err)
+	t.Log(num, err)
 }
 func TestQsUpdate(t *testing.T) {
 	o := NewOrm()
@@ -134,7 +127,7 @@ func TestQsUpdate(t *testing.T) {
 	num, err := qs.Filter("_id", "5e7431f78c1b4111312cce2d").Update(MgoSet, Params{
 		"type": "group",
 	})
-	logs.Info(num, err)
+	t.Log(num, err)
 }
 func TestQsDelete(t *testing.T) {
 	o := NewOrm()
@@ -142,7 +135,7 @@ func TestQsDelete(t *testing.T) {
 
 	qs := o.QueryTable("log")
 	num, err := qs.Filter("type", "group3").Delete()
-	logs.Info(num, err)
+	t.Log(num, err)
 }
 func TestQsIndexList(t *testing.T) {
 	o := NewOrm()
@@ -150,7 +143,7 @@ func TestQsIndexList(t *testing.T) {
 
 	qs := o.QueryTable("log")
 	indexes, err := qs.IndexView().List()
-	logs.Info(indexes, err)
+	t.Log(indexes, err)
 }
 func TestQsIndexCreateOne(t *testing.T) {
 	o := NewOrm()
@@ -162,7 +155,7 @@ func TestQsIndexCreateOne(t *testing.T) {
 	index.SetName("username").SetUnique(true)
 
 	indexes, err := qs.IndexView().CreateOne(index)
-	logs.Info(indexes, err)
+	t.Log(indexes, err)
 
 }
 func TestQsIndexDropOne(t *testing.T) {
@@ -171,13 +164,5 @@ func TestQsIndexDropOne(t *testing.T) {
 
 	qs := o.QueryTable("log")
 	err := qs.IndexView().DropOne("username")
-	logs.Info(err)
-}
-func TestOther(t *testing.T) {
-	// uri := "mongodb://@192.168.0.4:27017/Darwin-XYY"
-	// cs, err := connstring.Parse(uri)
-	// logs.Info(err)
-	// logs.Info(cs.Database)
-	logs.Info(time.Now().Unix())
-	logs.Info(time.Now().UTC().Unix())
+	t.Log(err)
 }

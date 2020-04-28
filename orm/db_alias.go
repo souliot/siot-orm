@@ -31,17 +31,20 @@ type DriverType int
 
 // Enum the Database driver
 const (
-	_ DriverType = iota // int enum type
-	DRMongo
+	_            DriverType = iota // int enum type
+	DRMongo                        // MongoDB
+	DRClickHouse                   // ClickHouse
 )
 
 var (
 	dataBaseCache = &_dbCache{cache: make(map[string]*alias)}
 	drivers       = map[string]DriverType{
-		"mongo": DRMongo,
+		// "mongo":      DRMongo,
+		// "clickhouse": DRClickHouse,
 	}
 	dbBasers = map[DriverType]dbBaser{
-		DRMongo: newdbBaseMongo(),
+		DRMongo:      newdbBaseMongo(),
+		DRClickHouse: newdbBaseClickHouse(),
 	}
 )
 
@@ -196,6 +199,7 @@ type alias struct {
 	DbName       string
 	MaxIdleConns int
 	MaxOpenConns int
+	DB           *DB
 	DbBaser      dbBaser
 	TZ           *time.Location
 	Engine       string
@@ -205,13 +209,24 @@ func (al *alias) getDB() (db *DB, err error) {
 	if al.Name == "" {
 		al.Name = "default"
 	}
-	client, err := pool.GetMgoClient(al.Name)
+	client, err := pool.GetClient(al.Name)
 	if err != nil {
 		DebugLog.Println(err.Error())
 		return
 	}
-
-	db = &DB{MDB: client.Database(al.DbName), Session: nil}
+	if al.Driver == DRMongo {
+		db = &DB{
+			MDB:     client.(*mongo.Client).Database(al.DbName),
+			Session: nil,
+			RWMutex: new(sync.RWMutex),
+		}
+	} else {
+		db = &DB{
+			DB:      client.(*sql.DB),
+			stmts:   make(map[string]*sql.Stmt),
+			RWMutex: new(sync.RWMutex),
+		}
+	}
 	return
 }
 
@@ -251,7 +266,13 @@ func RegisterDataBase(aliasName, driverName, dataSource string, force bool, para
 	var (
 		al *alias
 	)
-	err = pool.RegisterMgoPool(aliasName, dataSource, force, params...)
+	if t, ok := drivers[driverName]; ok {
+		if t == DRMongo {
+			err = pool.RegisterMgoPool(aliasName, dataSource, force, params...)
+		} else {
+			err = pool.RegisterSqlPool(aliasName, int(t), dataSource, force, params...)
+		}
+	}
 	if err != nil {
 		DebugLog.Println(err.Error())
 		return
@@ -272,12 +293,7 @@ func RegisterDataBase(aliasName, driverName, dataSource string, force bool, para
 }
 
 // RegisterDriver Register a database driver use specify driver name, this can be definition the driver is which database type.
-func RegisterDriver(driverName string, typ DriverType, force bool) error {
-	if force {
-		drivers[driverName] = typ
-		return nil
-	}
-
+func RegisterDriver(driverName string, typ DriverType) error {
 	if t, ok := drivers[driverName]; !ok {
 		drivers[driverName] = typ
 	} else {

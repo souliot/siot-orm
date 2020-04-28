@@ -15,6 +15,7 @@
 package orm
 
 import (
+	"context"
 	"database/sql"
 	"reflect"
 	"time"
@@ -88,9 +89,13 @@ type dbQuerier interface {
 	Rollback() error
 
 	Prepare(query string) (*sql.Stmt, error)
+	PrepareContext(ctx context.Context, query string) (*sql.Stmt, error)
 	Exec(query string, args ...interface{}) (sql.Result, error)
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
 	Query(query string, args ...interface{}) (*sql.Rows, error)
+	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
 	QueryRow(query string, args ...interface{}) *sql.Row
+	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
 }
 
 // base database struct
@@ -101,15 +106,6 @@ type dbBaser interface {
 	Update(dbQuerier, *modelInfo, reflect.Value, *time.Location, []string) (interface{}, error)
 	Delete(dbQuerier, *modelInfo, reflect.Value, *time.Location, []string) (interface{}, error)
 
-	MaxLimit() uint64
-	TableQuote() string
-	ReplaceMarks(*string)
-	SupportUpdateJoin() bool
-	OperatorSQL(string) string
-	GenerateOperatorSQL(*modelInfo, *fieldInfo, string, []interface{}, *time.Location) (string, []interface{})
-	GenerateOperatorLeftCol(*fieldInfo, string, *string)
-	HasReturningID(*modelInfo, *string) bool
-
 	FindOne(dbQuerier, *querySet, *modelInfo, *Condition, interface{}, *time.Location, []string) error
 	Distinct(dbQuerier, *querySet, *modelInfo, *Condition, *time.Location, string) ([]interface{}, error)
 	ReadBatch(dbQuerier, *querySet, *modelInfo, *Condition, interface{}, *time.Location, []string) error
@@ -119,6 +115,4 @@ type dbBaser interface {
 	Indexes(*querySet, *modelInfo, *time.Location) IndexViewer
 	TimeFromDB(*time.Time, *time.Location)
 	TimeToDB(*time.Time, *time.Location)
-
-	setval(dbQuerier, *modelInfo, []string) error
 }

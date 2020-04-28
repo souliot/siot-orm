@@ -58,3 +58,23 @@ func (m *_pools) get(name string) (p Pool, ok bool) {
 	p, ok = m.cache[name]
 	return
 }
+
+func GetClient(poolName string) (c interface{}, err error) {
+	if p, ok := pools.get(poolName); ok {
+		v, err := p.Get()
+		if err == nil {
+			c = v
+			defer PutClient(poolName, c)
+		}
+		return c, err
+	}
+	return nil, ErrGetConnection
+}
+
+func PutClient(poolName string, c interface{}) (err error) {
+	if p, ok := pools.get(poolName); ok {
+		err = p.Put(c)
+		return
+	}
+	return ErrPutConnection
+}
