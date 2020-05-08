@@ -10,6 +10,7 @@ var (
 	//ErrClosed 连接池已经关闭Error
 	ErrClosed        = errors.New("pool is closed")
 	ErrRegisterPool  = errors.New("register pool error")
+	ErrReleasePool   = errors.New("release pool error")
 	ErrGetConnection = errors.New("get connection error")
 	ErrPutConnection = errors.New("put connection error")
 )
@@ -77,4 +78,12 @@ func PutClient(poolName string, c interface{}) (err error) {
 		return
 	}
 	return ErrPutConnection
+}
+
+func ReleasePool(poolName string) (err error) {
+	if p, ok := pools.get(poolName); ok {
+		p.Release()
+		return nil
+	}
+	return ErrReleasePool
 }

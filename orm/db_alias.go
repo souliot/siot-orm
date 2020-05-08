@@ -80,6 +80,16 @@ func (ac *_dbCache) get(name string) (al *alias, ok bool) {
 	return
 }
 
+// delete database alias if cached.
+func (ac *_dbCache) del(name string) {
+	ac.mux.RLock()
+	defer ac.mux.RUnlock()
+	if _, ok := ac.cache[name]; ok {
+		delete(ac.cache, name)
+	}
+	return
+}
+
 // get default alias.
 func (ac *_dbCache) getDefault() (al *alias) {
 	al, _ = ac.get("default")
@@ -290,6 +300,11 @@ func RegisterDataBase(aliasName, driverName, dataSource string, force bool, para
 	detectTZ(al)
 
 	return
+}
+
+func ReleaseDataBase(aliasName string) (err error) {
+	dataBaseCache.del(aliasName)
+	return pool.ReleasePool(aliasName)
 }
 
 // RegisterDriver Register a database driver use specify driver name, this can be definition the driver is which database type.
