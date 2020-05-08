@@ -80,10 +80,10 @@ func PutClient(poolName string, c interface{}) (err error) {
 	return ErrPutConnection
 }
 
-func ReleasePool(poolName string) (err error) {
+func ReleasePool(poolName string) {
 	if p, ok := pools.get(poolName); ok {
 		p.Release()
-		return nil
+		return
 	}
-	return ErrReleasePool
+	return
 }

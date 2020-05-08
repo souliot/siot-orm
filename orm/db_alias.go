@@ -302,9 +302,9 @@ func RegisterDataBase(aliasName, driverName, dataSource string, force bool, para
 	return
 }
 
-func ReleaseDataBase(aliasName string) (err error) {
+func ReleaseDataBase(aliasName string) {
 	dataBaseCache.del(aliasName)
-	return pool.ReleasePool(aliasName)
+	pool.ReleasePool(aliasName)
 }
 
 // RegisterDriver Register a database driver use specify driver name, this can be definition the driver is which database type.
