@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	_ "github.com/ClickHouse/clickhouse-go"
+	"github.com/souliot/siot-orm/orm"
 )
 
 type Logs struct {
@@ -18,14 +19,10 @@ func (m *Logs) TableName() string {
 
 func init() {
 
-	RegisterModel(new(Logs))
+	orm.RegisterModel(new(Logs))
 
-	// RegisterDriver("mongo", DRMongo)
-	// RegisterDataBase("default", "mongo", "mongodb://yapi:abcd1234@192.168.50.200:27017/yapi", true)
-	RegisterDriver("clickhouse", DRClickHouse)
-	RegisterDataBase("default", "clickhouse", "tcp://192.168.0.8:9000?username=default&password=watrix888&database=test&read_timeout=10&write_timeout=20", true)
-	// RegisterDataBase("default", "mysql", "root:watrix@/businessserver?charset=utf8", true)
-	// RegisterDataBase("default", "mongo", "mongodb://yapi:abcd1234@vm:27017/yapi")
+	orm.RegisterDriver("mongo", orm.DRMongo)
+	orm.RegisterDataBase("default", "mongo", "mongodb://yapi:abcd1234@192.168.50.200:27017/yapi", true)
 
 }
 
@@ -38,14 +35,14 @@ var (
 )
 
 func TestRead(t *testing.T) {
-	o := NewOrm()
+	o := orm.NewOrm()
 	o.Using("default")
 
 	err := o.Read(&l, "UserName")
 	t.Log(err, l)
 }
 func TestReadOrCreate(t *testing.T) {
-	o := NewOrm()
+	o := orm.NewOrm()
 	o.Using("default")
 
 	c, id, err := o.ReadOrCreate(&l, "UserName")
@@ -53,7 +50,7 @@ func TestReadOrCreate(t *testing.T) {
 }
 
 func TestInsert(t *testing.T) {
-	o := NewOrm()
+	o := orm.NewOrm()
 	o.Using("default")
 
 	id, err := o.Insert(&l)
@@ -61,7 +58,7 @@ func TestInsert(t *testing.T) {
 }
 
 func TestInsertMulti(t *testing.T) {
-	o := NewOrm()
+	o := orm.NewOrm()
 	o.Using("default")
 
 	ls := []Logs{}
@@ -72,7 +69,7 @@ func TestInsertMulti(t *testing.T) {
 }
 
 func TestUpdate(t *testing.T) {
-	o := NewOrm()
+	o := orm.NewOrm()
 	o.Using("default")
 
 	l.Id = "asd"
@@ -82,7 +79,7 @@ func TestUpdate(t *testing.T) {
 }
 
 func TestDelete(t *testing.T) {
-	o := NewOrm()
+	o := orm.NewOrm()
 	o.Using("default")
 
 	l.Id = "asd"
@@ -92,7 +89,7 @@ func TestDelete(t *testing.T) {
 }
 
 func TestQsOne(t *testing.T) {
-	o := NewOrm()
+	o := orm.NewOrm()
 	o.Using("default")
 
 	qs := o.QueryTable("log")
@@ -101,7 +98,7 @@ func TestQsOne(t *testing.T) {
 }
 
 func TestQsAll(t *testing.T) {
-	o := NewOrm()
+	o := orm.NewOrm()
 	o.Using("default")
 	var ls []Logs
 	qs := o.QueryTable("log")
@@ -111,7 +108,7 @@ func TestQsAll(t *testing.T) {
 }
 
 func TestQsCount(t *testing.T) {
-	o := NewOrm()
+	o := orm.NewOrm()
 	o.Using("default")
 
 	qs := o.QueryTable("log")
@@ -120,17 +117,17 @@ func TestQsCount(t *testing.T) {
 	t.Log(num, err)
 }
 func TestQsUpdate(t *testing.T) {
-	o := NewOrm()
+	o := orm.NewOrm()
 	o.Using("default")
 
 	qs := o.QueryTable("log")
-	num, err := qs.Filter("_id", "5e7431f78c1b4111312cce2d").Update(MgoSet, Params{
+	num, err := qs.Filter("_id", "5e7431f78c1b4111312cce2d").Update(orm.MgoSet, orm.Params{
 		"type": "group",
 	})
 	t.Log(num, err)
 }
 func TestQsDelete(t *testing.T) {
-	o := NewOrm()
+	o := orm.NewOrm()
 	o.Using("default")
 
 	qs := o.QueryTable("log")
@@ -138,7 +135,7 @@ func TestQsDelete(t *testing.T) {
 	t.Log(num, err)
 }
 func TestQsIndexList(t *testing.T) {
-	o := NewOrm()
+	o := orm.NewOrm()
 	o.Using("default")
 
 	qs := o.QueryTable("log")
@@ -146,11 +143,11 @@ func TestQsIndexList(t *testing.T) {
 	t.Log(indexes, err)
 }
 func TestQsIndexCreateOne(t *testing.T) {
-	o := NewOrm()
+	o := orm.NewOrm()
 	o.Using("default")
 	qs := o.QueryTable("log")
 
-	index := Index{}
+	index := orm.Index{}
 	index.Keys = []string{"-username", "_id"}
 	index.SetName("username").SetUnique(true)
 
@@ -159,7 +156,7 @@ func TestQsIndexCreateOne(t *testing.T) {
 
 }
 func TestQsIndexDropOne(t *testing.T) {
-	o := NewOrm()
+	o := orm.NewOrm()
 	o.Using("default")
 
 	qs := o.QueryTable("log")

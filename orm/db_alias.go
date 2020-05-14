@@ -17,6 +17,7 @@ package orm
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -34,6 +35,10 @@ const (
 	_            DriverType = iota // int enum type
 	DRMongo                        // MongoDB
 	DRClickHouse                   // ClickHouse
+)
+
+var (
+	ErrNoDriver = errors.New("db driver has not registered")
 )
 
 var (
@@ -98,32 +103,58 @@ func (ac *_dbCache) getDefault() (al *alias) {
 
 type DB struct {
 	*sync.RWMutex
+	DbType  DriverType
 	MDB     *mongo.Database
 	Session mongo.Session
 	DB      *sql.DB
+	TX      interface{}
+	isTx    bool
 	stmts   map[string]*sql.Stmt
 }
 
 var _ dbQuerier = new(DB)
 
 func (d *DB) Begin() (err error) {
-	d.Session, err = d.MDB.Client().StartSession()
-	if err != nil {
-		return
-	}
-	defer d.Session.EndSession(todo)
+	d.isTx = true
+	switch d.DbType {
+	case DRMongo:
+		d.Session, err = d.MDB.Client().StartSession()
+		if err != nil {
+			return
+		}
+		defer d.Session.EndSession(todo)
 
-	//开始事务
-	err = d.Session.StartTransaction()
+		//开始事务
+		err = d.Session.StartTransaction()
+	case DRClickHouse:
+		d.TX, err = d.DB.Begin()
+	default:
+	}
 
 	return
 }
 
 func (d *DB) Commit() (err error) {
-	return d.Session.CommitTransaction(todo)
+	d.isTx = false
+	switch d.DbType {
+	case DRMongo:
+		return d.Session.CommitTransaction(todo)
+	case DRClickHouse:
+		return d.TX.(*sql.Tx).Commit()
+	default:
+	}
+	return
 }
 func (d *DB) Rollback() (err error) {
-	return d.Session.AbortTransaction(todo)
+	d.isTx = false
+	switch d.DbType {
+	case DRMongo:
+		return d.Session.AbortTransaction(todo)
+	case DRClickHouse:
+		return d.TX.(*sql.Tx).Rollback()
+	default:
+	}
+	return
 }
 func (d *DB) getStmt(query string) (*sql.Stmt, error) {
 	d.RLock()
@@ -143,8 +174,19 @@ func (d *DB) getStmt(query string) (*sql.Stmt, error) {
 	return stmt, nil
 }
 
-func (d *DB) Prepare(query string) (*sql.Stmt, error) {
-	return d.DB.Prepare(query)
+func (d *DB) Prepare(query string) (st *sql.Stmt, err error) {
+	switch d.DbType {
+	case DRMongo:
+		return nil, nil
+	case DRClickHouse:
+		if d.isTx {
+			return d.TX.(*sql.Tx).Prepare(query)
+		} else {
+			return d.DB.Prepare(query)
+		}
+	default:
+	}
+	return
 }
 
 func (d *DB) PrepareContext(ctx context.Context, query string) (*sql.Stmt, error) {
@@ -224,14 +266,17 @@ func (al *alias) getDB() (db *DB, err error) {
 		DebugLog.Println(err.Error())
 		return
 	}
+
 	if al.Driver == DRMongo {
 		db = &DB{
+			DbType:  DRMongo,
 			MDB:     client.(*mongo.Client).Database(al.DbName),
 			Session: nil,
 			RWMutex: new(sync.RWMutex),
 		}
 	} else {
 		db = &DB{
+			DbType:  DRClickHouse,
 			DB:      client.(*sql.DB),
 			stmts:   make(map[string]*sql.Stmt),
 			RWMutex: new(sync.RWMutex),
@@ -277,10 +322,13 @@ func RegisterDataBase(aliasName, driverName, dataSource string, force bool, para
 		al *alias
 	)
 	if t, ok := drivers[driverName]; ok {
-		if t == DRMongo {
+		switch t {
+		case DRMongo:
 			err = pool.RegisterMgoPool(aliasName, dataSource, force, params...)
-		} else {
-			err = pool.RegisterSqlPool(aliasName, int(t), dataSource, force, params...)
+		case DRClickHouse:
+			err = pool.RegisterClickPool(aliasName, dataSource, force, params...)
+		default:
+			err = ErrNoDriver
 		}
 	}
 	if err != nil {

@@ -1,13 +1,15 @@
 package orm
 
 import (
+	"database/sql"
+	"fmt"
 	"reflect"
+	"strings"
 	"time"
+)
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+var (
+	OpDefault OperatorUpdate = "$set"
 )
 
 // mysql dbBaser implementation.
@@ -26,192 +28,441 @@ func newdbBaseClickHouse() dbBaser {
 
 // read one record.
 func (d *dbBaseClickHouse) FindOne(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condition, container interface{}, tz *time.Location, cols []string) (err error) {
-	db := qs.orm.db.(*DB).MDB
-	col := db.Collection(mi.table)
-	opt := options.FindOne()
-	if len(cols) > 0 {
-		projection := bson.M{}
-		for _, col := range cols {
-			projection[col] = 1
-		}
-		opt.SetProjection(projection)
+	qs.limit = 1
+	err = d.ReadBatch(q, qs, mi, cond, container, tz, cols)
+	if err != nil {
+		return err
 	}
 
-	if len(qs.orders) > 0 {
-		opt.SetSort(getSort(qs.orders))
-	}
-
-	if qs.offset != 0 {
-		opt.SetSkip(qs.offset)
-	}
-
-	filter := convertCondition(cond)
-
-	if qs != nil && qs.forContext {
-		err = col.FindOne(qs.ctx, filter, opt).Decode(container)
-	} else {
-		err = col.FindOne(todo, filter, opt).Decode(container)
-	}
-
-	return
+	return nil
 }
 
 // read one record.
 func (d *dbBaseClickHouse) Distinct(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condition, tz *time.Location, field string) (res []interface{}, err error) {
-	db := qs.orm.db.(*DB).MDB
-	col := db.Collection(mi.table)
-	opt := options.Distinct()
-
-	filter := convertCondition(cond)
-
-	if qs != nil && qs.forContext {
-		return col.Distinct(qs.ctx, field, filter, opt)
-	} else {
-		return col.Distinct(todo, field, filter, opt)
-	}
+	return
 }
 
 // read all records.
 func (d *dbBaseClickHouse) ReadBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condition, container interface{}, tz *time.Location, cols []string) (err error) {
-	db := qs.orm.db.(*DB).MDB
-	col := db.Collection(mi.table)
+	val := reflect.ValueOf(container)
+	ind := reflect.Indirect(val)
 
-	opt := options.Find()
-	if len(cols) > 0 {
-		projection := bson.M{}
-		for _, col := range cols {
-			projection[col] = 1
+	errTyp := true
+	one := true
+	isPtr := true
+
+	if val.Kind() == reflect.Ptr {
+		fn := ""
+		if ind.Kind() == reflect.Slice {
+			one = false
+			typ := ind.Type().Elem()
+			switch typ.Kind() {
+			case reflect.Ptr:
+				fn = getFullName(typ.Elem())
+			case reflect.Struct:
+				isPtr = false
+				fn = getFullName(typ)
+			}
+		} else {
+			fn = getFullName(ind.Type())
 		}
-		opt.SetProjection(projection)
+		errTyp = fn != mi.fullName
 	}
 
-	if len(qs.orders) > 0 {
-		opt.SetSort(getSort(qs.orders))
+	if errTyp {
+		if one {
+			panic(fmt.Errorf("wrong object type `%s` for rows scan, need *%s", val.Type(), mi.fullName))
+		} else {
+			panic(fmt.Errorf("wrong object type `%s` for rows scan, need *[]*%s or *[]%s", val.Type(), mi.fullName, mi.fullName))
+		}
 	}
 
-	if qs.limit != 0 {
-		opt.SetLimit(qs.limit)
-	}
+	rlimit := qs.limit
+	offset := qs.offset
 
-	if qs.offset != 0 {
-		opt.SetSkip(qs.offset)
-	}
+	Q := d.ins.TableQuote()
 
-	filter := convertCondition(cond)
-	cur := &mongo.Cursor{}
-	if qs != nil && qs.forContext {
-		// Do something with content
-		cur, err = col.Find(qs.ctx, filter, opt)
+	var tCols []string
+	if len(cols) > 0 {
+		hasRel := len(qs.related) > 0 || qs.relDepth > 0
+		tCols = make([]string, 0, len(cols))
+		var maps map[string]bool
+		if hasRel {
+			maps = make(map[string]bool)
+		}
+		for _, col := range cols {
+			if fi, ok := mi.fields.GetByAny(col); ok {
+				tCols = append(tCols, fi.column)
+				if hasRel {
+					maps[fi.column] = true
+				}
+			} else {
+				return fmt.Errorf("wrong field/column name `%s`", col)
+			}
+		}
+		if hasRel {
+			for _, fi := range mi.fields.fieldsDB {
+				if fi.fieldType&IsRelField > 0 {
+					if !maps[fi.column] {
+						tCols = append(tCols, fi.column)
+					}
+				}
+			}
+		}
 	} else {
-		// Do something without content
-		cur, err = col.Find(todo, filter, opt)
+		tCols = mi.fields.dbcols
 	}
-	// defer cur.Close(todo)
-	if err != nil {
-		return
-	}
-	err = cur.All(todo, container)
 
-	return
+	colsNum := len(tCols)
+	sep := fmt.Sprintf("%s, T0.%s", Q, Q)
+	sels := fmt.Sprintf("T0.%s%s%s", Q, strings.Join(tCols, sep), Q)
+
+	tables := newDbTables(mi, d.ins)
+	tables.parseRelated(qs.related, qs.relDepth)
+
+	where, args := tables.getCondSQL(cond, false, tz)
+	groupBy := tables.getGroupSQL(qs.groups)
+	orderBy := tables.getOrderSQL(qs.orders)
+	limit := tables.getLimitSQL(mi, offset, rlimit)
+	join := tables.getJoinSQL()
+
+	for _, tbl := range tables.tables {
+		if tbl.sel {
+			colsNum += len(tbl.mi.fields.dbcols)
+			sep := fmt.Sprintf("%s, %s.%s", Q, tbl.index, Q)
+			sels += fmt.Sprintf(", %s.%s%s%s", tbl.index, Q, strings.Join(tbl.mi.fields.dbcols, sep), Q)
+		}
+	}
+
+	sqlSelect := "SELECT"
+	if qs.distinct {
+		sqlSelect += " DISTINCT"
+	}
+	query := fmt.Sprintf("%s %s FROM %s%s%s T0 %s%s%s%s%s", sqlSelect, sels, Q, mi.table, Q, join, where, groupBy, orderBy, limit)
+
+	if qs.forupdate {
+		query += " FOR UPDATE"
+	}
+
+	d.ins.ReplaceMarks(&query)
+
+	var rs *sql.Rows
+	if qs != nil && qs.forContext {
+		rs, err = q.QueryContext(qs.ctx, query, args...)
+		if err != nil {
+			return err
+		}
+	} else {
+		rs, err = q.Query(query, args...)
+		if err != nil {
+			return err
+		}
+	}
+
+	refs := make([]interface{}, colsNum)
+	for i := range refs {
+		var ref interface{}
+		refs[i] = &ref
+	}
+
+	defer rs.Close()
+
+	slice := ind
+
+	var cnt int64
+	for rs.Next() {
+		if one && cnt == 0 || !one {
+			if err := rs.Scan(refs...); err != nil {
+				return err
+			}
+
+			elm := reflect.New(mi.addrField.Elem().Type())
+			mind := reflect.Indirect(elm)
+
+			cacheV := make(map[string]*reflect.Value)
+			cacheM := make(map[string]*modelInfo)
+			trefs := refs
+
+			d.setColsValues(mi, &mind, tCols, refs[:len(tCols)], tz)
+			trefs = refs[len(tCols):]
+
+			for _, tbl := range tables.tables {
+				// loop selected tables
+				if tbl.sel {
+					last := mind
+					names := ""
+					mmi := mi
+					// loop cascade models
+					for _, name := range tbl.names {
+						names += name
+						if val, ok := cacheV[names]; ok {
+							last = *val
+							mmi = cacheM[names]
+						} else {
+							fi := mmi.fields.GetByName(name)
+							lastm := mmi
+							mmi = fi.relModelInfo
+							field := last
+							if last.Kind() != reflect.Invalid {
+								field = reflect.Indirect(last.FieldByIndex(fi.fieldIndex))
+								if field.IsValid() {
+									d.setColsValues(mmi, &field, mmi.fields.dbcols, trefs[:len(mmi.fields.dbcols)], tz)
+									for _, fi := range mmi.fields.fieldsReverse {
+										if fi.inModel && fi.reverseFieldInfo.mi == lastm {
+											if fi.reverseFieldInfo != nil {
+												f := field.FieldByIndex(fi.fieldIndex)
+												if f.Kind() == reflect.Ptr {
+													f.Set(last.Addr())
+												}
+											}
+										}
+									}
+									last = field
+								}
+							}
+							cacheV[names] = &field
+							cacheM[names] = mmi
+						}
+					}
+					trefs = trefs[len(mmi.fields.dbcols):]
+				}
+			}
+
+			if one {
+				ind.Set(mind)
+			} else {
+				if cnt == 0 {
+					// you can use a empty & caped container list
+					// orm will not replace it
+					if ind.Len() != 0 {
+						// if container is not empty
+						// create a new one
+						slice = reflect.New(ind.Type()).Elem()
+					}
+				}
+
+				if isPtr {
+					slice = reflect.Append(slice, mind.Addr())
+				} else {
+					slice = reflect.Append(slice, mind)
+				}
+			}
+		}
+		cnt++
+	}
+
+	if !one {
+		if cnt > 0 {
+			ind.Set(slice)
+		} else {
+			// when a result is empty and container is nil
+			// to set a empty container
+			if ind.IsNil() {
+				ind.Set(reflect.MakeSlice(ind.Type(), 0, 0))
+			}
+		}
+	}
+
+	return nil
 }
 
 // get the recodes count.
-func (d *dbBaseClickHouse) Count(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condition, tz *time.Location) (i int64, err error) {
-	db := qs.orm.db.(*DB).MDB
-	col := db.Collection(mi.table)
+func (d *dbBaseClickHouse) Count(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condition, tz *time.Location) (cnt int64, err error) {
+	tables := newDbTables(mi, d.ins)
+	tables.parseRelated(qs.related, qs.relDepth)
 
-	opt := options.Count()
+	where, args := tables.getCondSQL(cond, false, tz)
+	groupBy := tables.getGroupSQL(qs.groups)
+	tables.getOrderSQL(qs.orders)
+	join := tables.getJoinSQL()
 
-	filter := convertCondition(cond)
+	Q := d.ins.TableQuote()
 
-	if qs != nil && qs.forContext {
-		if len(filter) == 0 {
-			i, err = col.EstimatedDocumentCount(qs.ctx, nil)
-		} else {
-			i, err = col.CountDocuments(qs.ctx, filter, opt)
-		}
-	} else {
-		// Do something without content
-		if len(filter) == 0 {
-			i, err = col.EstimatedDocumentCount(todo, nil)
-		} else {
-			i, err = col.CountDocuments(todo, filter, opt)
-		}
+	query := fmt.Sprintf("SELECT COUNT(*) FROM %s%s%s T0 %s%s%s", Q, mi.table, Q, join, where, groupBy)
+
+	if groupBy != "" {
+		query = fmt.Sprintf("SELECT COUNT(*) FROM (%s) AS T", query)
 	}
 
+	d.ins.ReplaceMarks(&query)
+
+	var row *sql.Row
+	if qs != nil && qs.forContext {
+		row = q.QueryRowContext(qs.ctx, query, args...)
+	} else {
+		row = q.QueryRow(query, args...)
+	}
+	err = row.Scan(&cnt)
 	return
 }
 
 // update the recodes.
 func (d *dbBaseClickHouse) UpdateBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condition, operator OperatorUpdate, params Params, tz *time.Location) (i int64, err error) {
-	db := qs.orm.db.(*DB).MDB
-	col := db.Collection(mi.table)
-
-	opt := options.Update()
-
-	filter := convertCondition(cond)
-	update := bson.M{}
+	columns := make([]string, 0, len(params))
+	values := make([]interface{}, 0, len(params))
 	for col, val := range params {
-		// if fi, ok := mi.fields.GetByAny(col); !ok || !fi.dbcol {
-		// 	panic(fmt.Errorf("wrong field/column name `%s`", col))
-		// } else {
-		update[col] = val
-		// }
+		if fi, ok := mi.fields.GetByAny(col); !ok || !fi.dbcol {
+			panic(fmt.Errorf("wrong field/column name `%s`", col))
+		} else {
+			columns = append(columns, fi.column)
+			values = append(values, val)
+		}
 	}
-	update = bson.M{
-		string(operator): update,
+
+	if len(columns) == 0 {
+		panic(fmt.Errorf("update params cannot empty"))
 	}
-	r := &mongo.UpdateResult{}
-	if qs != nil && qs.forContext {
-		r, err = col.UpdateMany(qs.ctx, filter, update, opt)
+
+	tables := newDbTables(mi, d.ins)
+	if qs != nil {
+		tables.parseRelated(qs.related, qs.relDepth)
+	}
+
+	where, args := tables.getCondSQL(cond, false, tz)
+
+	values = append(values, args...)
+
+	join := tables.getJoinSQL()
+
+	var query, T string
+
+	Q := d.ins.TableQuote()
+
+	if d.ins.SupportUpdateJoin() {
+		T = "T0."
+	}
+
+	cols := make([]string, 0, len(columns))
+
+	for i, v := range columns {
+		col := fmt.Sprintf("%s%s%s%s", T, Q, v, Q)
+		if c, ok := values[i].(colValue); ok {
+			switch c.opt {
+			case ColAdd:
+				cols = append(cols, col+" = "+col+" + ?")
+			case ColMinus:
+				cols = append(cols, col+" = "+col+" - ?")
+			case ColMultiply:
+				cols = append(cols, col+" = "+col+" * ?")
+			case ColExcept:
+				cols = append(cols, col+" = "+col+" / ?")
+			}
+			values[i] = c.value
+		} else {
+			cols = append(cols, col+" = ?")
+		}
+	}
+
+	sets := strings.Join(cols, ", ") + " "
+
+	if d.ins.SupportUpdateJoin() {
+		query = fmt.Sprintf("UPDATE %s%s%s T0 %sSET %s%s", Q, mi.table, Q, join, sets, where)
 	} else {
-		// Do something without content
-		r, err = col.UpdateMany(todo, filter, update, opt)
-	}
-	if err != nil {
-		return
+		supQuery := fmt.Sprintf("SELECT T0.%s%s%s FROM %s%s%s T0 %s%s", Q, mi.fields.pk.column, Q, Q, mi.table, Q, join, where)
+		query = fmt.Sprintf("UPDATE %s%s%s SET %sWHERE %s%s%s IN ( %s )", Q, mi.table, Q, sets, Q, mi.fields.pk.column, Q, supQuery)
 	}
 
-	i = r.ModifiedCount
-
-	return
+	d.ins.ReplaceMarks(&query)
+	var res sql.Result
+	if qs != nil && qs.forContext {
+		res, err = q.ExecContext(qs.ctx, query, values...)
+	} else {
+		res, err = q.Exec(query, values...)
+	}
+	if err == nil {
+		return res.RowsAffected()
+	}
+	return 0, err
 }
 
 // delete the recodes.
 func (d *dbBaseClickHouse) DeleteBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condition, tz *time.Location) (i int64, err error) {
-	db := qs.orm.db.(*DB).MDB
-	col := db.Collection(mi.table)
+	tables := newDbTables(mi, d.ins)
+	tables.skipEnd = true
 
-	opt := options.Delete()
-
-	filter := convertCondition(cond)
-
-	r := &mongo.DeleteResult{}
-	if qs != nil && qs.forContext {
-		r, err = col.DeleteMany(qs.ctx, filter, opt)
-	} else {
-		// Do something without content
-		r, err = col.DeleteMany(todo, filter, opt)
+	if qs != nil {
+		tables.parseRelated(qs.related, qs.relDepth)
 	}
+
+	if cond == nil || cond.IsEmpty() {
+		panic(fmt.Errorf("delete operation cannot execute without condition"))
+	}
+
+	Q := d.ins.TableQuote()
+
+	where, args := tables.getCondSQL(cond, false, tz)
+	join := tables.getJoinSQL()
+
+	cols := fmt.Sprintf("T0.%s%s%s", Q, mi.fields.pk.column, Q)
+	query := fmt.Sprintf("SELECT %s FROM %s%s%s T0 %s%s", cols, Q, mi.table, Q, join, where)
+
+	d.ins.ReplaceMarks(&query)
+
+	var rs *sql.Rows
+	r, err := q.Query(query, args...)
 	if err != nil {
-		return
+		return 0, err
+	}
+	rs = r
+	defer rs.Close()
+
+	var ref interface{}
+	args = make([]interface{}, 0)
+	cnt := 0
+	for rs.Next() {
+		if err := rs.Scan(&ref); err != nil {
+			return 0, err
+		}
+		pkValue, err := d.convertValueFromDB(mi.fields.pk, reflect.ValueOf(ref).Interface(), tz)
+		if err != nil {
+			return 0, err
+		}
+		args = append(args, pkValue)
+		cnt++
 	}
 
-	i = r.DeletedCount
+	if cnt == 0 {
+		return 0, nil
+	}
 
-	return
+	marks := make([]string, len(args))
+	for i := range marks {
+		marks[i] = "?"
+	}
+	sqlIn := fmt.Sprintf("IN (%s)", strings.Join(marks, ", "))
+	query = fmt.Sprintf("DELETE FROM %s%s%s WHERE %s%s%s %s", Q, mi.table, Q, Q, mi.fields.pk.column, Q, sqlIn)
+
+	d.ins.ReplaceMarks(&query)
+	var res sql.Result
+	if qs != nil && qs.forContext {
+		res, err = q.ExecContext(qs.ctx, query, args...)
+	} else {
+		res, err = q.Exec(query, args...)
+	}
+	if err == nil {
+		num, err := res.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		if num > 0 {
+			err := d.deleteRels(q, mi, args, tz)
+			if err != nil {
+				return num, err
+			}
+		}
+		return num, nil
+	}
+	return 0, err
 }
 
 // read one record.
 func (d *dbBaseClickHouse) Read(q dbQuerier, mi *modelInfo, ind reflect.Value, container interface{}, tz *time.Location, cols []string, isForUpdate bool) (err error) {
-	db := q.(*DB).MDB
-	col := db.Collection(mi.table)
-
-	opt := options.FindOne()
-
 	var whereCols []string
 	var args []interface{}
+
+	// if specify cols length > 0, then use it for where condition.
 	if len(cols) > 0 {
+		var err error
 		whereCols = make([]string, 0, len(cols))
 		args, _, err = d.collectValues(mi, ind, cols, false, false, &whereCols, tz)
 		if err != nil {
@@ -227,153 +478,319 @@ func (d *dbBaseClickHouse) Read(q dbQuerier, mi *modelInfo, ind reflect.Value, c
 		args = append(args, pkValue)
 	}
 
-	filter := bson.M{}
-	for i, p := range whereCols {
-		filter[p] = args[i]
+	Q := d.ins.TableQuote()
+	sep := fmt.Sprintf("%s, %s", Q, Q)
+	sels := strings.Join(mi.fields.dbcols, sep)
+	colsNum := len(mi.fields.dbcols)
+
+	sep = fmt.Sprintf("%s = ? AND %s", Q, Q)
+	wheres := strings.Join(whereCols, sep)
+
+	forUpdate := ""
+	if isForUpdate {
+		forUpdate = "FOR UPDATE"
 	}
-	// Do something without content
-	data, err := col.FindOne(todo, filter, opt).DecodeBytes()
-	if err != nil {
+
+	query := fmt.Sprintf("SELECT %s%s%s FROM %s%s%s WHERE %s%s%s = ? %s", Q, sels, Q, Q, mi.table, Q, Q, wheres, Q, forUpdate)
+
+	refs := make([]interface{}, colsNum)
+	for i := range refs {
+		var ref interface{}
+		refs[i] = &ref
+	}
+
+	d.ins.ReplaceMarks(&query)
+
+	row := q.QueryRow(query, args...)
+	if err := row.Scan(refs...); err != nil {
+		if err == sql.ErrNoRows {
+			return ErrNoRows
+		}
 		return err
 	}
-	err = bson.Unmarshal(data, container)
-
-	return
+	elm := reflect.New(mi.addrField.Elem().Type())
+	mind := reflect.Indirect(elm)
+	d.setColsValues(mi, &mind, mi.fields.dbcols, refs, tz)
+	ind.Set(mind)
+	return nil
 }
 
 // insert one record.
 func (d *dbBaseClickHouse) InsertOne(q dbQuerier, mi *modelInfo, ind reflect.Value, container interface{}, tz *time.Location) (id interface{}, err error) {
-	db := q.(*DB).MDB
-	col := db.Collection(mi.table)
-	_, _, b := getExistPk(mi, ind)
-	name := mi.fields.pk.name
-
-	if !b {
-		reflect.ValueOf(container).Elem().FieldByName(name).SetString(primitive.NewObjectID().Hex())
-	}
-
-	opt := options.InsertOne()
-
-	// Do something without content
-	data, err := col.InsertOne(todo, container, opt)
+	names := make([]string, 0, len(mi.fields.dbcols))
+	values, autoFields, err := d.collectValues(mi, ind, mi.fields.dbcols, false, true, &names, tz)
 	if err != nil {
-		return
+		return 0, err
 	}
-	id = data.InsertedID
-	return
+
+	id, err = d.InsertValue(q, mi, false, names, values)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(autoFields) > 0 {
+		err = d.setval(q, mi, autoFields)
+	}
+	return id, err
 }
 
 // insert all records.
-func (d *dbBaseClickHouse) InsertMulti(q dbQuerier, mi *modelInfo, ind reflect.Value, bulk int, containers interface{}, tz *time.Location) (ids interface{}, err error) {
-	db := q.(*DB).MDB
-	col := db.Collection(mi.table)
-	_, _, b := getExistPk(mi, ind)
-	name := mi.fields.pk.name
-	sind := reflect.Indirect(reflect.ValueOf(containers))
+func (d *dbBaseClickHouse) InsertMulti(q dbQuerier, mi *modelInfo, sind reflect.Value, bulk int, field interface{}, tz *time.Location) (ids interface{}, err error) {
+	var (
+		cnt    int64
+		nums   int
+		values []interface{}
+		names  []string
+	)
+	// typ := reflect.Indirect(mi.addrField).Type()
 
-	cs := []interface{}{}
+	cols := make([]string, 0)
 
-	if !b {
-		for i := 0; i < sind.Len(); i++ {
-			c := reflect.Indirect(sind.Index(i))
-			c.FieldByName(name).SetString(primitive.NewObjectID().Hex())
-			cs = append(cs, c.Interface())
+	for _, v := range mi.fields.columns {
+		if !v.null {
+			cols = append(cols, v.column)
 		}
 	}
 
-	opt := options.InsertMany()
+	length, autoFields := sind.Len(), make([]string, 0, 1)
 
-	// Do something without content
-	data, err := col.InsertMany(todo, cs, opt)
-	if err != nil {
-		return
+	for i := 1; i <= length; i++ {
+
+		ind := reflect.Indirect(sind.Index(i - 1))
+		// Is this needed ?
+		// if !ind.Type().AssignableTo(typ) {
+		// 	return cnt, ErrArgs
+		// }
+
+		if i == 1 {
+			var (
+				vus []interface{}
+				err error
+			)
+			vus, autoFields, err = d.collectValues(mi, ind, cols, false, true, &names, tz)
+			if err != nil {
+				return cnt, err
+			}
+			values = make([]interface{}, bulk*len(vus))
+			nums += copy(values, vus)
+		} else {
+			vus, _, err := d.collectValues(mi, ind, cols, false, true, nil, tz)
+			if err != nil {
+				return cnt, err
+			}
+
+			if len(vus) != len(names) {
+				return cnt, ErrArgs
+			}
+
+			nums += copy(values[nums:], vus)
+		}
+
+		if i > 1 && i%bulk == 0 || length == i {
+			num, err := d.InsertValue(q, mi, true, names, values[:nums])
+			if err != nil {
+				return cnt, err
+			}
+			cnt += num
+			nums = 0
+		}
 	}
-	ids = data.InsertedIDs
-	return
+
+	if len(autoFields) > 0 {
+		err = d.setval(q, mi, autoFields)
+	}
+
+	return cnt, err
+}
+
+// execute insert sql with given struct and given values.
+// insert the given values, not the field values in struct.
+func (d *dbBaseClickHouse) InsertValue(q dbQuerier, mi *modelInfo, isMulti bool, names []string, values []interface{}) (cnt int64, err error) {
+	Q := d.ins.TableQuote()
+
+	marks := make([]string, len(names))
+	for i := range marks {
+		marks[i] = "?"
+	}
+
+	sep := fmt.Sprintf("%s, %s", Q, Q)
+	qmarks := strings.Join(marks, ", ")
+	columns := strings.Join(names, sep)
+
+	multi := len(values) / len(names)
+
+	// if isMulti {
+	// 	qmarks = strings.Repeat(qmarks+"), (", multi-1) + qmarks
+	// }
+
+	query := fmt.Sprintf("INSERT INTO %s%s%s (%s%s%s) VALUES (%s)", Q, mi.table, Q, Q, columns, Q, qmarks)
+	d.ReplaceMarks(&query)
+	q.Begin()
+
+	if isMulti || !d.HasReturningID(mi, &query) {
+		start := 0
+		end := 0
+		for i := 0; i < multi; i++ {
+			start = i * len(names)
+			end = (i + 1) * len(names)
+			_, err = q.Exec(query, values[start:end]...)
+			if err != nil {
+				q.Rollback()
+				return 0, err
+			}
+		}
+	}
+	q.Commit()
+	return 0, err
 }
 
 // update one record.
 func (d *dbBaseClickHouse) Update(q dbQuerier, mi *modelInfo, ind reflect.Value, tz *time.Location, cols []string) (id interface{}, err error) {
-	db := q.(*DB).MDB
-	col := db.Collection(mi.table)
-	c, val, b := getExistPk(mi, ind)
-	if !b {
-		return nil, ErrHaveNoPK
+	pkName, pkValue, ok := getExistPk(mi, ind)
+	if !ok {
+		return 0, ErrMissPK
 	}
 
-	opt := options.Update()
-	var whereCols []string
-	var args []interface{}
+	var setNames []string
 
+	// if specify cols length is zero, then commit all columns.
 	if len(cols) == 0 {
 		cols = mi.fields.dbcols
+		setNames = make([]string, 0, len(mi.fields.dbcols)-1)
+	} else {
+		setNames = make([]string, 0, len(cols))
 	}
-	whereCols = make([]string, 0, len(cols))
-	args, _, err = d.collectValues(mi, ind, cols, false, false, &whereCols, tz)
+
+	setValues, _, err := d.collectValues(mi, ind, cols, true, false, &setNames, tz)
 	if err != nil {
-		return
+		return 0, err
 	}
 
-	filter := bson.M{
-		c: val,
+	var findAutoNowAdd, findAutoNow bool
+	var index int
+	for i, col := range setNames {
+		if mi.fields.GetByColumn(col).autoNowAdd {
+			index = i
+			findAutoNowAdd = true
+		}
+		if mi.fields.GetByColumn(col).autoNow {
+			findAutoNow = true
+		}
+	}
+	if findAutoNowAdd {
+		setNames = append(setNames[0:index], setNames[index+1:]...)
+		setValues = append(setValues[0:index], setValues[index+1:]...)
 	}
 
-	update := bson.M{}
-	for i, p := range whereCols {
-		if p != c {
-			update[p] = args[i]
+	if !findAutoNow {
+		for col, info := range mi.fields.columns {
+			if info.autoNow {
+				setNames = append(setNames, col)
+				setValues = append(setValues, time.Now())
+			}
 		}
 	}
 
-	update = bson.M{
-		"$set": update,
-	}
+	setValues = append(setValues, pkValue)
 
-	// Do something without content
-	data, err := col.UpdateOne(todo, filter, update, opt)
-	id = data.UpsertedID
-	return
+	Q := d.ins.TableQuote()
+
+	sep := fmt.Sprintf("%s = ?, %s", Q, Q)
+	setColumns := strings.Join(setNames, sep)
+
+	query := fmt.Sprintf("UPDATE %s%s%s SET %s%s%s = ? WHERE %s%s%s = ?", Q, mi.table, Q, Q, setColumns, Q, Q, pkName, Q)
+
+	d.ins.ReplaceMarks(&query)
+
+	res, err := q.Exec(query, setValues...)
+	if err == nil {
+		return res.RowsAffected()
+	}
+	return 0, err
 }
 
 // delete one record.
 func (d *dbBaseClickHouse) Delete(q dbQuerier, mi *modelInfo, ind reflect.Value, tz *time.Location, cols []string) (cnt interface{}, err error) {
-	db := q.(*DB).MDB
-	col := db.Collection(mi.table)
-
-	opt := options.Delete()
 	var whereCols []string
 	var args []interface{}
+	// if specify cols length > 0, then use it for where condition.
 	if len(cols) > 0 {
+		var err error
 		whereCols = make([]string, 0, len(cols))
 		args, _, err = d.collectValues(mi, ind, cols, false, false, &whereCols, tz)
 		if err != nil {
-			return
+			return 0, err
 		}
 	} else {
 		// default use pk value as where condtion.
 		pkColumn, pkValue, ok := getExistPk(mi, ind)
 		if !ok {
-			return nil, ErrMissPK
+			return 0, ErrMissPK
 		}
 		whereCols = []string{pkColumn}
 		args = append(args, pkValue)
 	}
 
-	filter := bson.M{}
-	for i, p := range whereCols {
-		filter[p] = args[i]
-	}
+	Q := d.ins.TableQuote()
 
-	// Do something without content
-	data, err := col.DeleteOne(todo, filter, opt)
-	cnt = data.DeletedCount
-	return
+	sep := fmt.Sprintf("%s = ? AND %s", Q, Q)
+	wheres := strings.Join(whereCols, sep)
+
+	query := fmt.Sprintf("DELETE FROM %s%s%s WHERE %s%s%s = ?", Q, mi.table, Q, Q, wheres, Q)
+
+	d.ins.ReplaceMarks(&query)
+	res, err := q.Exec(query, args...)
+	if err == nil {
+		num, err := res.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		if num > 0 {
+			if mi.fields.pk.auto {
+				if mi.fields.pk.fieldType&IsPositiveIntegerField > 0 {
+					ind.FieldByIndex(mi.fields.pk.fieldIndex).SetUint(0)
+				} else {
+					ind.FieldByIndex(mi.fields.pk.fieldIndex).SetInt(0)
+				}
+			}
+			err := d.deleteRels(q, mi, args, tz)
+			if err != nil {
+				return num, err
+			}
+		}
+		return num, err
+	}
+	return 0, err
+}
+
+// do UpdateBanch or DeleteBanch by condition of tables' relationship.
+func (d *dbBaseClickHouse) deleteRels(q dbQuerier, mi *modelInfo, args []interface{}, tz *time.Location) error {
+	for _, fi := range mi.fields.fieldsReverse {
+		fi = fi.reverseFieldInfo
+		switch fi.onDelete {
+		case odCascade:
+			cond := NewCondition().And(fmt.Sprintf("%s__in", fi.name), args...)
+			_, err := d.DeleteBatch(q, nil, fi.mi, cond, tz)
+			if err != nil {
+				return err
+			}
+		case odSetDefault, odSetNULL:
+			cond := NewCondition().And(fmt.Sprintf("%s__in", fi.name), args...)
+			params := Params{fi.column: nil}
+			if fi.onDelete == odSetDefault {
+				params[fi.column] = fi.initial.String()
+			}
+			_, err := d.UpdateBatch(q, nil, fi.mi, cond, OpDefault, params, tz)
+			if err != nil {
+				return err
+			}
+		case odDoNothing:
+		}
+	}
+	return nil
 }
 
 // get indexview.
 func (d *dbBaseClickHouse) Indexes(qs *querySet, mi *modelInfo, tz *time.Location) (iv IndexViewer) {
-	db := qs.orm.db.(*DB).MDB
-	col := db.Collection(mi.table)
-
-	return newIndexView(col.Indexes())
+	return
 }

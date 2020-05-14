@@ -60,30 +60,10 @@ func (m *_pools) get(name string) (p Pool, ok bool) {
 	return
 }
 
-func GetClient(poolName string) (c interface{}, err error) {
-	if p, ok := pools.get(poolName); ok {
-		v, err := p.Get()
-		if err == nil {
-			c = v
-			defer PutClient(poolName, c)
-		}
-		return c, err
-	}
-	return nil, ErrGetConnection
-}
-
-func PutClient(poolName string, c interface{}) (err error) {
-	if p, ok := pools.get(poolName); ok {
-		err = p.Put(c)
-		return
-	}
-	return ErrPutConnection
-}
-
-func ReleasePool(poolName string) {
-	if p, ok := pools.get(poolName); ok {
-		p.Release()
-		return
-	}
+// get pool if cached.
+func (m *_pools) del(name string) {
+	m.mux.RLock()
+	defer m.mux.RUnlock()
+	delete(m.cache, name)
 	return
 }

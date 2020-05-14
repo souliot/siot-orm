@@ -279,12 +279,12 @@ func (d *dbBaseMongo) InsertOne(q dbQuerier, mi *modelInfo, ind reflect.Value, c
 }
 
 // insert all records.
-func (d *dbBaseMongo) InsertMulti(q dbQuerier, mi *modelInfo, ind reflect.Value, bulk int, containers interface{}, tz *time.Location) (ids interface{}, err error) {
+func (d *dbBaseMongo) InsertMulti(q dbQuerier, mi *modelInfo, sind reflect.Value, bulk int, containers interface{}, tz *time.Location) (ids interface{}, err error) {
 	db := q.(*DB).MDB
 	col := db.Collection(mi.table)
+	ind := reflect.Indirect(sind.Index(0))
 	_, _, b := getExistPk(mi, ind)
 	name := mi.fields.pk.name
-	sind := reflect.Indirect(reflect.ValueOf(containers))
 
 	cs := []interface{}{}
 

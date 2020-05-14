@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 )
 
@@ -50,6 +51,71 @@ func (d *dbBase) TimeFromDB(t *time.Time, tz *time.Location) {
 // convert time to db.
 func (d *dbBase) TimeToDB(t *time.Time, tz *time.Location) {
 	*t = t.In(tz)
+}
+
+// generate sql with replacing operator string placeholders and replaced values.
+func (d *dbBase) GenerateOperatorSQL(mi *modelInfo, fi *fieldInfo, operator string, args []interface{}, tz *time.Location) (string, []interface{}) {
+	var sql string
+	params := getFlatParams(fi, args, tz)
+
+	if len(params) == 0 {
+		panic(fmt.Errorf("operator `%s` need at least one args", operator))
+	}
+	arg := params[0]
+
+	switch operator {
+	case "in":
+		marks := make([]string, len(params))
+		for i := range marks {
+			marks[i] = "?"
+		}
+		sql = fmt.Sprintf("IN (%s)", strings.Join(marks, ", "))
+	case "between":
+		if len(params) != 2 {
+			panic(fmt.Errorf("operator `%s` need 2 args not %d", operator, len(params)))
+		}
+		sql = "BETWEEN ? AND ?"
+	default:
+		if len(params) > 1 {
+			panic(fmt.Errorf("operator `%s` need 1 args not %d", operator, len(params)))
+		}
+		sql = d.ins.OperatorSQL(operator)
+		switch operator {
+		case "exact":
+			if arg == nil {
+				params[0] = "IS NULL"
+			}
+		case "iexact", "contains", "icontains", "startswith", "endswith", "istartswith", "iendswith":
+			param := strings.Replace(ToStr(arg), `%`, `\%`, -1)
+			switch operator {
+			case "iexact":
+			case "contains", "icontains":
+				param = fmt.Sprintf("%%%s%%", param)
+			case "startswith", "istartswith":
+				param = fmt.Sprintf("%s%%", param)
+			case "endswith", "iendswith":
+				param = fmt.Sprintf("%%%s", param)
+			}
+			params[0] = param
+		case "isnull":
+			if b, ok := arg.(bool); ok {
+				if b {
+					sql = "IS NULL"
+				} else {
+					sql = "IS NOT NULL"
+				}
+				params = nil
+			} else {
+				panic(fmt.Errorf("operator `%s` need a bool value not `%T`", operator, arg))
+			}
+		}
+	}
+	return sql, params
+}
+
+// gernerate sql string with inner function, such as UPPER(text).
+func (d *dbBase) GenerateOperatorLeftCol(*fieldInfo, string, *string) {
+	// default not use
 }
 
 // get struct columns values as interface slice.
@@ -614,4 +680,37 @@ setValue:
 	}
 
 	return value, nil
+}
+
+// sync auto key
+func (d *dbBase) setval(db dbQuerier, mi *modelInfo, autoFields []string) error {
+	return nil
+}
+
+// flag of update joined record.
+func (d *dbBase) SupportUpdateJoin() bool {
+	return true
+}
+func (d *dbBase) MaxLimit() uint64 {
+	return 18446744073709551615
+}
+
+// return quote.
+func (d *dbBase) TableQuote() string {
+	return "`"
+}
+
+// replace value placeholder in parametered sql string.
+func (d *dbBase) ReplaceMarks(query *string) {
+	// default use `?` as mark, do nothing
+}
+
+// flag of RETURNING sql.
+func (d *dbBase) HasReturningID(*modelInfo, *string) bool {
+	return false
+}
+
+// not implement.
+func (d *dbBase) OperatorSQL(operator string) string {
+	panic(ErrNotImplement)
 }

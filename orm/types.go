@@ -115,4 +115,12 @@ type dbBaser interface {
 	Indexes(*querySet, *modelInfo, *time.Location) IndexViewer
 	TimeFromDB(*time.Time, *time.Location)
 	TimeToDB(*time.Time, *time.Location)
+
+	SupportUpdateJoin() bool
+	MaxLimit() uint64
+	TableQuote() string
+	ReplaceMarks(*string)
+	OperatorSQL(string) string
+	GenerateOperatorSQL(*modelInfo, *fieldInfo, string, []interface{}, *time.Location) (string, []interface{})
+	GenerateOperatorLeftCol(*fieldInfo, string, *string)
 }

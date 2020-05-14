@@ -4,6 +4,22 @@ import (
 	"time"
 )
 
+type DriverType int
+
+// Enum the Database driver
+// const (
+// 	_            DriverType = iota // int enum type
+// 	DRMongo                        // MongoDB
+// 	DRClickHouse                   // ClickHouse
+// )
+
+// var (
+// 	driversName = map[DriverType]string{
+// 		DRMongo:      "mongo",
+// 		DRClickHouse: "clickhouse",
+// 	}
+// )
+
 type Pooler interface {
 	Factory() (interface{}, error)
 	Ping(interface{}) error
@@ -18,12 +34,12 @@ func RegisterPool(poolName string, p Pooler, force bool, params ...int) (err err
 
 	//close 关闭连接的方法
 	close := func(v interface{}) error {
-		return p.Ping(v)
+		return p.Close(v)
 	}
 
 	//ping 检测连接的方法
 	ping := func(v interface{}) error {
-		return p.Close(v)
+		return p.Ping(v)
 	}
 
 	var (
@@ -42,7 +58,6 @@ func RegisterPool(poolName string, p Pooler, force bool, params ...int) (err err
 			idle = time.Duration(v)
 		}
 	}
-
 	//创建一个连接池： 初始化5，最大连接30
 	poolConfig := &Config{
 		InitialCap: size,
@@ -53,10 +68,54 @@ func RegisterPool(poolName string, p Pooler, force bool, params ...int) (err err
 		//连接最大空闲时间，超过该时间的连接 将会关闭，可避免空闲时连接EOF，自动失效的问题
 		IdleTimeout: idle * time.Second,
 	}
-	mgoPool, err := NewChannelPool(poolConfig)
+	pool, err := NewChannelPool(poolConfig)
+	if err != nil {
+		return ErrRegisterPool
+	}
 
-	if !pools.add(poolName, mgoPool, force) {
+	if !pools.add(poolName, pool, force) {
 		return ErrRegisterPool
 	}
 	return
+}
+
+func GetClient(poolName string) (c interface{}, err error) {
+	if p, ok := pools.get(poolName); ok {
+		v, err := p.Get()
+		if err == nil {
+			c = v
+			defer PutClient(poolName, c)
+		}
+		return c, err
+	}
+	return nil, ErrGetConnection
+}
+
+func PutClient(poolName string, c interface{}) (err error) {
+	if p, ok := pools.get(poolName); ok {
+		err = p.Put(c)
+		return
+	}
+	return ErrPutConnection
+}
+
+func ReleasePool(poolName string) {
+	if p, ok := pools.get(poolName); ok {
+		p.Release()
+		pools.del(poolName)
+		return
+	}
+	return
+}
+
+func IsRegister(poolName string) (ok bool) {
+	_, ok = pools.get(poolName)
+	return
+}
+
+func ReleaseAll() {
+	for k, v := range pools.cache {
+		v.Release()
+		pools.del(k)
+	}
 }

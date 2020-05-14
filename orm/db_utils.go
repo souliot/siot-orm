@@ -44,6 +44,10 @@ func getExistPk(mi *modelInfo, ind reflect.Value) (column string, value interfac
 		value = vu
 	} else if fi.fieldType&IsRelField > 0 {
 		_, value, exist = getExistPk(fi.relModelInfo, reflect.Indirect(v))
+	} else if fi.fieldType == TypeTimeField || fi.fieldType == TypeDateField || fi.fieldType == TypeDateTimeField {
+		vu := v.Interface().(time.Time)
+		exist = !vu.IsZero()
+		value = vu
 	} else {
 		vu := v.String()
 		exist = vu != ""

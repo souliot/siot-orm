@@ -116,7 +116,7 @@ func (o *orm) InsertMulti(bulk int, mds interface{}) (ids interface{}, err error
 
 	ind := reflect.Indirect(sind.Index(0))
 	mi, _ := o.getMiInd(ind.Interface(), false)
-	ids, err = o.alias.DbBaser.InsertMulti(o.db, mi, ind, bulk, mds, o.alias.TZ)
+	ids, err = o.alias.DbBaser.InsertMulti(o.db, mi, sind, bulk, mds, o.alias.TZ)
 	return
 }
 
