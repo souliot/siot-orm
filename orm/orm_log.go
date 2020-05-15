@@ -15,6 +15,7 @@
 package orm
 
 import (
+	"database/sql"
 	"fmt"
 	"io"
 	"log"
@@ -63,4 +64,49 @@ func debugLogQueies(alias *alias, operaton, query string, t time.Time, err error
 		LogFunc(logMap)
 	}
 	DebugLog.Println(con)
+}
+
+// statement query logger struct.
+// if dev mode, use stmtQueryLog, or use stmtQuerier.
+type stmtQueryLog struct {
+	alias *alias
+	query string
+	stmt  stmtQuerier
+}
+
+var _ stmtQuerier = new(stmtQueryLog)
+
+func (d *stmtQueryLog) Close() error {
+	a := time.Now()
+	err := d.stmt.Close()
+	debugLogQueies(d.alias, "st.Close", d.query, a, err)
+	return err
+}
+
+func (d *stmtQueryLog) Exec(args ...interface{}) (sql.Result, error) {
+	a := time.Now()
+	res, err := d.stmt.Exec(args...)
+	debugLogQueies(d.alias, "st.Exec", d.query, a, err, args...)
+	return res, err
+}
+
+func (d *stmtQueryLog) Query(args ...interface{}) (*sql.Rows, error) {
+	a := time.Now()
+	res, err := d.stmt.Query(args...)
+	debugLogQueies(d.alias, "st.Query", d.query, a, err, args...)
+	return res, err
+}
+
+func (d *stmtQueryLog) QueryRow(args ...interface{}) *sql.Row {
+	a := time.Now()
+	res := d.stmt.QueryRow(args...)
+	debugLogQueies(d.alias, "st.QueryRow", d.query, a, nil, args...)
+	return res
+}
+func newStmtQueryLog(alias *alias, stmt stmtQuerier, query string) stmtQuerier {
+	d := new(stmtQueryLog)
+	d.stmt = stmt
+	d.alias = alias
+	d.query = query
+	return d
 }

@@ -8,6 +8,10 @@ import (
 	"github.com/souliot/siot-orm/orm"
 )
 
+var (
+	clickAddress = "tcp://192.168.0.8:9000?username=default&password=watrix888"
+)
+
 type Logs struct {
 	Time        time.Time `orm:"pk;column(_time);type(datetime)" bson:"time"`
 	Date        time.Time `orm:"column(_date);null" bson:"date"`
@@ -21,12 +25,16 @@ type Logs struct {
 func (m *Logs) TableName() string {
 	return "darwin_log"
 }
+func (m *Logs) TablePk() string {
+	return "_time"
+}
 
 func init() {
+	orm.ResetModelCache()
 	orm.RegisterModel(new(Logs))
-
 	// RegisterDriver("mongo", DRMongo)
 	// RegisterDataBase("default", "mongo", "mongodb://yapi:abcd1234@192.168.50.200:27017/yapi", true)
+	orm.ReleaseDataBase("default")
 	orm.RegisterDriver("clickhouse", orm.DRClickHouse)
 	orm.RegisterDataBase("default", "clickhouse", "tcp://192.168.0.8:9000?username=default&password=watrix888&database=log&read_timeout=10&write_timeout=20", true)
 	// RegisterDataBase("default", "mysql", "root:watrix@/businessserver?charset=utf8", true)
@@ -72,7 +80,38 @@ func TestInsert(t *testing.T) {
 	t.Log(err, cnt)
 }
 
-type Stu struct {
-	Str  string
-	Time time.Time
+func TestRaw(t *testing.T) {
+	o := orm.NewOrm()
+	o.Using("default")
+	var res orm.ParamsList
+	_, err := o.Raw("SELECT count() as cnt FROM darwin_log").ValuesFlat(&res)
+
+	t.Log(res, err)
+}
+
+func TestCreateDB(t *testing.T) {
+	o := orm.NewOrm()
+	o.Using("default")
+	_, err := o.Raw(`
+	CREATE DATABASE IF NOT EXISTS test
+	`).Exec()
+	t.Log(err)
+}
+func TestCreateTable(t *testing.T) {
+	o := orm.NewOrm()
+	o.Using("default")
+	_, err := o.Raw(`
+	CREATE TABLE test.darwin_log_1 (
+		Time DateTime,
+		Date Date DEFAULT toDate(Time),
+		Level String,
+		FuncCall String,
+		ServiceName String,
+		Address String,
+		Message String
+	) ENGINE = MergeTree() PARTITION BY toYYYYMM(Date) PRIMARY KEY (Time, ServiceName, Level)
+	ORDER BY
+		(Time, ServiceName, Level) SETTINGS index_granularity = 8192
+	`).Exec()
+	t.Log(err)
 }

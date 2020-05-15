@@ -312,6 +312,9 @@ checkType:
 	fi.auto = attrs["auto"]
 	fi.pk = attrs["pk"]
 	fi.unique = attrs["unique"]
+	if getTablePk(mi.addrField) == fi.column || getTablePk(mi.addrField) == fi.name {
+		fi.pk = true
+	}
 
 	// Mark object property if there is attribute "default" in the orm configuration
 	if _, ok := tags["default"]; ok {

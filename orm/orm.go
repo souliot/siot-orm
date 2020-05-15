@@ -193,6 +193,7 @@ func (o *orm) Using(name string) error {
 	}
 	return nil
 }
+
 func (o *orm) Begin() (err error) {
 	if o.isTx {
 		return
@@ -231,4 +232,9 @@ func (o *orm) Rollback() (err error) {
 		return ErrTxDone
 	}
 	return
+}
+
+// return a raw query seter for raw sql string.
+func (o *orm) Raw(query string, args ...interface{}) RawSeter {
+	return newRawSet(o, query, args)
 }

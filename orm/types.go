@@ -45,6 +45,8 @@ type Ormer interface {
 	Commit() error
 	Rollback() error
 	Using(string) error
+
+	Raw(query string, args ...interface{}) RawSeter
 }
 
 type QuerySeter interface {
@@ -123,4 +125,82 @@ type dbBaser interface {
 	OperatorSQL(string) string
 	GenerateOperatorSQL(*modelInfo, *fieldInfo, string, []interface{}, *time.Location) (string, []interface{})
 	GenerateOperatorLeftCol(*fieldInfo, string, *string)
+}
+
+// RawPreparer raw query statement
+type RawPreparer interface {
+	Exec(...interface{}) (sql.Result, error)
+	Close() error
+}
+
+// RawSeter raw query seter
+// create From Ormer.Raw
+// for example:
+//  sql := fmt.Sprintf("SELECT %sid%s,%sname%s FROM %suser%s WHERE id = ?",Q,Q,Q,Q,Q,Q)
+//  rs := Ormer.Raw(sql, 1)
+type RawSeter interface {
+	//execute sql and get result
+	Exec() (sql.Result, error)
+	//query data and map to container
+	//for example:
+	//	var name string
+	//	var id int
+	//	rs.QueryRow(&id,&name) // id==2 name=="slene"
+	QueryRow(containers ...interface{}) error
+
+	// query data rows and map to container
+	//	var ids []int
+	//	var names []int
+	//	query = fmt.Sprintf("SELECT 'id','name' FROM %suser%s", Q, Q)
+	//	num, err = dORM.Raw(query).QueryRows(&ids,&names) // ids=>{1,2},names=>{"nobody","slene"}
+	QueryRows(containers ...interface{}) (int64, error)
+	SetArgs(...interface{}) RawSeter
+	// query data to []map[string]interface
+	// see QuerySeter's Values
+	Values(container *[]Params, cols ...string) (int64, error)
+	// query data to [][]interface
+	// see QuerySeter's ValuesList
+	ValuesList(container *[]ParamsList, cols ...string) (int64, error)
+	// query data to []interface
+	// see QuerySeter's ValuesFlat
+	ValuesFlat(container *ParamsList, cols ...string) (int64, error)
+	// query all rows into map[string]interface with specify key and value column name.
+	// keyCol = "name", valueCol = "value"
+	// table data
+	// name  | value
+	// total | 100
+	// found | 200
+	// to map[string]interface{}{
+	// 	"total": 100,
+	// 	"found": 200,
+	// }
+	RowsToMap(result *Params, keyCol, valueCol string) (int64, error)
+	// query all rows into struct with specify key and value column name.
+	// keyCol = "name", valueCol = "value"
+	// table data
+	// name  | value
+	// total | 100
+	// found | 200
+	// to struct {
+	// 	Total int
+	// 	Found int
+	// }
+	RowsToStruct(ptrStruct interface{}, keyCol, valueCol string) (int64, error)
+
+	// return prepared raw statement for used in times.
+	// for example:
+	// 	pre, err := dORM.Raw("INSERT INTO tag (name) VALUES (?)").Prepare()
+	// 	r, err := pre.Exec("name1") // INSERT INTO tag (name) VALUES (`name1`)
+	Prepare() (RawPreparer, error)
+}
+
+// stmtQuerier statement querier
+type stmtQuerier interface {
+	Close() error
+	Exec(args ...interface{}) (sql.Result, error)
+	//ExecContext(ctx context.Context, args ...interface{}) (sql.Result, error)
+	Query(args ...interface{}) (*sql.Rows, error)
+	//QueryContext(args ...interface{}) (*sql.Rows, error)
+	QueryRow(args ...interface{}) *sql.Row
+	//QueryRowContext(ctx context.Context, args ...interface{}) *sql.Row
 }

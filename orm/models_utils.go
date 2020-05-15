@@ -81,6 +81,18 @@ func getTableEngine(val reflect.Value) string {
 	return ""
 }
 
+// get table engine, myisam or innodb.
+func getTablePk(val reflect.Value) string {
+	fun := val.MethodByName("TablePk")
+	if fun.IsValid() {
+		vals := fun.Call([]reflect.Value{})
+		if len(vals) > 0 && vals[0].Kind() == reflect.String {
+			return vals[0].String()
+		}
+	}
+	return ""
+}
+
 // get table index from method.
 func getTableIndex(val reflect.Value) [][]string {
 	fun := val.MethodByName("TableIndex")

@@ -618,6 +618,7 @@ func (d *dbBaseClickHouse) InsertValue(q dbQuerier, mi *modelInfo, isMulti bool,
 	columns := strings.Join(names, sep)
 
 	multi := len(values) / len(names)
+	cnt = int64(multi)
 
 	// if isMulti {
 	// 	qmarks = strings.Repeat(qmarks+"), (", multi-1) + qmarks
@@ -627,6 +628,8 @@ func (d *dbBaseClickHouse) InsertValue(q dbQuerier, mi *modelInfo, isMulti bool,
 	d.ReplaceMarks(&query)
 	q.Begin()
 
+	fmt.Println(query)
+
 	if isMulti || !d.HasReturningID(mi, &query) {
 		start := 0
 		end := 0
@@ -635,13 +638,13 @@ func (d *dbBaseClickHouse) InsertValue(q dbQuerier, mi *modelInfo, isMulti bool,
 			end = (i + 1) * len(names)
 			_, err = q.Exec(query, values[start:end]...)
 			if err != nil {
-				q.Rollback()
-				return 0, err
+				cnt -= 1
+				continue
 			}
 		}
 	}
 	q.Commit()
-	return 0, err
+	return cnt, err
 }
 
 // update one record.
