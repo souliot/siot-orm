@@ -65,7 +65,7 @@ func NewChannelPool(poolConfig *Config) (Pool, error) {
 		conn, err := c.factory()
 		if err != nil {
 			c.Release()
-			return nil, fmt.Errorf("factory is not able to fill the pool: %s", err)
+			return nil, errors.New("factory is not able to fill the pool: " + err.Error())
 		}
 		c.conns <- &idleConn{conn: conn, t: time.Now()}
 	}

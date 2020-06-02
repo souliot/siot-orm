@@ -38,7 +38,8 @@ const (
 )
 
 var (
-	ErrNoDriver = errors.New("db driver has not registered")
+	ErrNoDriver     = errors.New("db driver has not registered")
+	ErrDBConnection = errors.New("db connections error")
 )
 
 var (
@@ -180,7 +181,11 @@ func (d *DB) Prepare(query string) (st *sql.Stmt, err error) {
 		return nil, nil
 	case DRClickHouse:
 		if d.isTx {
-			return d.TX.(*sql.Tx).Prepare(query)
+			if d.TX.(*sql.Tx) != nil {
+				return d.TX.(*sql.Tx).Prepare(query)
+			} else {
+				return nil, ErrDBConnection
+			}
 		} else {
 			return d.DB.Prepare(query)
 		}
