@@ -51,6 +51,7 @@ type Ormer interface {
 
 type QuerySeter interface {
 	Filter(string, ...interface{}) QuerySeter
+	FilterRaw(string, string) QuerySeter
 	Exclude(string, ...interface{}) QuerySeter
 	SetCond(*Condition) QuerySeter
 	GetCond() *Condition

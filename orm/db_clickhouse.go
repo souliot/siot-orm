@@ -11,6 +11,24 @@ import (
 var (
 	OpDefault OperatorUpdate = "$set"
 )
+var clickOperators = map[string]string{
+	"exact":     "= ?",
+	"iexact":    "LIKE ?",
+	"contains":  "LIKE BINARY ?",
+	"icontains": "LIKE ?",
+	// "regex":       "REGEXP BINARY ?",
+	// "iregex":      "REGEXP ?",
+	"gt":          "> ?",
+	"gte":         ">= ?",
+	"lt":          "< ?",
+	"lte":         "<= ?",
+	"eq":          "= ?",
+	"ne":          "!= ?",
+	"startswith":  "LIKE BINARY ?",
+	"endswith":    "LIKE BINARY ?",
+	"istartswith": "LIKE ?",
+	"iendswith":   "LIKE ?",
+}
 
 // mysql dbBaser implementation.
 type dbBaseClickHouse struct {
@@ -24,6 +42,11 @@ func newdbBaseClickHouse() dbBaser {
 	b := new(dbBaseClickHouse)
 	b.ins = b
 	return b
+}
+
+// get mysql operator.
+func (d *dbBaseClickHouse) OperatorSQL(operator string) string {
+	return clickOperators[operator]
 }
 
 // read one record.
@@ -430,7 +453,8 @@ func (d *dbBaseClickHouse) DeleteBatch(q dbQuerier, qs *querySet, mi *modelInfo,
 		marks[i] = "?"
 	}
 	sqlIn := fmt.Sprintf("IN (%s)", strings.Join(marks, ", "))
-	query = fmt.Sprintf("DELETE FROM %s%s%s WHERE %s%s%s %s", Q, mi.table, Q, Q, mi.fields.pk.column, Q, sqlIn)
+	// query = fmt.Sprintf("DELETE FROM %s%s%s WHERE %s%s%s %s", Q, mi.table, Q, Q, mi.fields.pk.column, Q, sqlIn)
+	query = fmt.Sprintf("ALTER TABLE %s%s%s DELETE WHERE %s%s%s %s", Q, mi.table, Q, Q, mi.fields.pk.column, Q, sqlIn)
 
 	d.ins.ReplaceMarks(&query)
 	var res sql.Result
@@ -739,7 +763,8 @@ func (d *dbBaseClickHouse) Delete(q dbQuerier, mi *modelInfo, ind reflect.Value,
 	sep := fmt.Sprintf("%s = ? AND %s", Q, Q)
 	wheres := strings.Join(whereCols, sep)
 
-	query := fmt.Sprintf("DELETE FROM %s%s%s WHERE %s%s%s = ?", Q, mi.table, Q, Q, wheres, Q)
+	// query := fmt.Sprintf("DELETE FROM %s%s%s WHERE %s%s%s = ?", Q, mi.table, Q, Q, wheres, Q)
+	query := fmt.Sprintf("ALTER TABLE %s%s%s DELETE WHERE %s%s%s = ?", Q, mi.table, Q, Q, wheres, Q)
 
 	d.ins.ReplaceMarks(&query)
 	res, err := q.Exec(query, args...)
