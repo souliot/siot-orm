@@ -204,6 +204,8 @@ func getFieldType(val reflect.Value) (ft int, err error) {
 			ft = TypeBooleanField
 		case reflect.String:
 			ft = TypeVarCharField
+		case reflect.Interface:
+			ft = TypeInterface
 		default:
 			if elm.Interface() == nil {
 				panic(fmt.Errorf("%s is nil pointer, may be miss setting tag", val))

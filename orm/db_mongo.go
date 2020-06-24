@@ -438,11 +438,22 @@ func convertCondition(cond *Condition) (filter bson.M) {
 						"$or": bson.A{filter, bson.M{k: v}},
 					}
 				} else {
-					// where += "AND "
-					filter[k] = v
+					if _, ok := filter[k]; ok {
+						filter = bson.M{
+							"$and": bson.A{filter, bson.M{k: v}},
+						}
+					} else {
+						filter[k] = v
+					}
 				}
 			} else {
-				filter[k] = v
+				if _, ok := filter[k]; ok {
+					filter = bson.M{
+						"$and": bson.A{filter, bson.M{k: v}},
+					}
+				} else {
+					filter[k] = v
+				}
 			}
 
 		}

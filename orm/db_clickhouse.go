@@ -457,26 +457,18 @@ func (d *dbBaseClickHouse) DeleteBatch(q dbQuerier, qs *querySet, mi *modelInfo,
 	query = fmt.Sprintf("ALTER TABLE %s%s%s DELETE WHERE %s%s%s %s", Q, mi.table, Q, Q, mi.fields.pk.column, Q, sqlIn)
 
 	d.ins.ReplaceMarks(&query)
-	var res sql.Result
-	if qs != nil && qs.forContext {
-		res, err = q.ExecContext(qs.ctx, query, args...)
-	} else {
-		res, err = q.Exec(query, args...)
+
+	num, err := d.Count(q, qs, mi, cond, tz)
+	if err != nil {
+		return 0, err
 	}
-	if err == nil {
-		num, err := res.RowsAffected()
+	if num > 0 {
+		err := d.deleteRels(q, mi, args, tz)
 		if err != nil {
-			return 0, err
+			return num, err
 		}
-		if num > 0 {
-			err := d.deleteRels(q, mi, args, tz)
-			if err != nil {
-				return num, err
-			}
-		}
-		return num, nil
 	}
-	return 0, err
+	return num, nil
 }
 
 // read one record.

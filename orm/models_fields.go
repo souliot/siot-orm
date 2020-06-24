@@ -47,6 +47,7 @@ const (
 	RelReverseOne
 	RelReverseMany
 	MongoStruct
+	TypeInterface
 	TypeUnknow
 )
 
