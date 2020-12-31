@@ -222,7 +222,6 @@ func (o *querySet) One(container interface{}, cols ...string) (err error) {
 }
 
 func (o *querySet) Distinct(field string) (res []interface{}, err error) {
-
 	return o.orm.alias.DbBaser.Distinct(o.orm.db, o, o.mi, o.cond, o.orm.alias.TZ, field)
 }
 
@@ -230,19 +229,19 @@ func (o *querySet) Distinct(field string) (res []interface{}, err error) {
 // expres means condition expression.
 // it converts data to []map[column]value.
 func (o *querySet) Values(results *[]Params, exprs ...string) (i int64, err error) {
-	return
+	return o.orm.alias.DbBaser.ReadValues(o.orm.db, o, o.mi, o.cond, exprs, results, o.orm.alias.TZ)
 }
 
 // query all data and map to [][]interface
 // it converts data to [][column_index]value
 func (o *querySet) ValuesList(results *[]ParamsList, exprs ...string) (i int64, err error) {
-	return
+	return o.orm.alias.DbBaser.ReadValues(o.orm.db, o, o.mi, o.cond, exprs, results, o.orm.alias.TZ)
 }
 
 // query all data and map to []interface.
 // it's designed for one row record set, auto change to []value, not [][column]value.
-func (o *querySet) ValuesFlat(result *ParamsList, expr string) (i int64, err error) {
-	return
+func (o *querySet) ValuesFlat(result *ParamsList, expr string) (cnt int64, err error) {
+	return o.orm.alias.DbBaser.ReadValues(o.orm.db, o, o.mi, o.cond, []string{expr}, result, o.orm.alias.TZ)
 }
 
 // query all rows into map[string]interface with specify key and value column name.

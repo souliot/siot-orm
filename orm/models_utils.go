@@ -206,6 +206,8 @@ func getFieldType(val reflect.Value) (ft int, err error) {
 			ft = TypeVarCharField
 		case reflect.Interface:
 			ft = TypeInterface
+		case reflect.Slice:
+			ft = TypeSlice
 		default:
 			if elm.Interface() == nil {
 				panic(fmt.Errorf("%s is nil pointer, may be miss setting tag", val))

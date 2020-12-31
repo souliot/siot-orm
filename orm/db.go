@@ -33,6 +33,7 @@ var (
 		"istartswith": true,
 		"iendswith":   true,
 		"in":          true,
+		"nin":         true,
 		"between":     true,
 		"isnull":      true,
 		"regex":       true,
@@ -70,6 +71,12 @@ func (d *dbBase) GenerateOperatorSQL(mi *modelInfo, fi *fieldInfo, operator stri
 			marks[i] = "?"
 		}
 		sql = fmt.Sprintf("IN (%s)", strings.Join(marks, ", "))
+	case "nin":
+		marks := make([]string, len(params))
+		for i := range marks {
+			marks[i] = "?"
+		}
+		sql = fmt.Sprintf("NOT IN (%s)", strings.Join(marks, ", "))
 	case "between":
 		if len(params) != 2 {
 			panic(fmt.Errorf("operator `%s` need 2 args not %d", operator, len(params)))
@@ -232,6 +239,11 @@ func (d *dbBase) collectFieldValue(mi *modelInfo, fi *fieldInfo, ind reflect.Val
 					} else {
 						value = t
 					}
+				}
+			case TypeSlice:
+				value = field.Interface()
+				if t, ok := value.([]byte); ok {
+					value = t
 				}
 			default:
 				switch {
@@ -478,6 +490,8 @@ setValue:
 		fi = fi.relModelInfo.fields.pk
 		fieldType = fi.fieldType
 		goto setValue
+	default:
+		value = val
 	}
 
 end:
@@ -659,6 +673,11 @@ setValue:
 				field.SetFloat(value.(float64))
 			}
 		}
+	case fieldType == TypeSlice:
+		if value != nil {
+			v := value.([]byte)
+			field.SetBytes(v)
+		}
 	case fieldType&IsRelField > 0:
 		if value != nil {
 			fieldType = fi.relModelInfo.fields.pk.fieldType
@@ -680,6 +699,10 @@ setValue:
 	}
 
 	return value, nil
+}
+
+func (d *dbBase) ReadValues(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condition, exprs []string, container interface{}, tz *time.Location) (cnt int64, err error) {
+	return
 }
 
 // sync auto key

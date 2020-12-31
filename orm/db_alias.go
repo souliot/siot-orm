@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/souliot/siot-orm/pool"
+
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/x/mongo/driver/connstring"
 )
@@ -353,6 +354,13 @@ func RegisterDataBase(aliasName, driverName, dataSource string, force bool, para
 	detectTZ(al)
 
 	return
+}
+
+func HasDefaultDataBase() bool {
+	if dataBaseCache.getDefault() == nil {
+		return false
+	}
+	return true
 }
 
 func ReleaseDataBase(aliasName string) {

@@ -4,12 +4,13 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/ClickHouse/clickhouse-go"
 	"github.com/souliot/siot-orm/orm"
+
+	_ "github.com/ClickHouse/clickhouse-go"
 )
 
 var (
-	clickAddress = "tcp://192.168.0.8:9000?username=default&password=watrix888"
+	clickAddress = "tcp://192.168.0.4:9008?username=default&password=watrix888"
 )
 
 type Logs struct {

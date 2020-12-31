@@ -118,7 +118,7 @@ type dbBaser interface {
 	Indexes(*querySet, *modelInfo, *time.Location) IndexViewer
 	TimeFromDB(*time.Time, *time.Location)
 	TimeToDB(*time.Time, *time.Location)
-
+	ReadValues(dbQuerier, *querySet, *modelInfo, *Condition, []string, interface{}, *time.Location) (int64, error)
 	SupportUpdateJoin() bool
 	MaxLimit() uint64
 	TableQuote() string

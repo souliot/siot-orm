@@ -3,8 +3,9 @@ package orm
 import (
 	"testing"
 
-	_ "github.com/ClickHouse/clickhouse-go"
 	"github.com/souliot/siot-orm/orm"
+
+	_ "github.com/ClickHouse/clickhouse-go"
 )
 
 type Logs struct {

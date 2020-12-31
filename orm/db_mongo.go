@@ -285,13 +285,17 @@ func (d *dbBaseMongo) InsertMulti(q dbQuerier, mi *modelInfo, sind reflect.Value
 	ind := reflect.Indirect(sind.Index(0))
 	_, _, b := getExistPk(mi, ind)
 	name := mi.fields.pk.name
-
 	cs := []interface{}{}
 
 	if !b {
 		for i := 0; i < sind.Len(); i++ {
 			c := reflect.Indirect(sind.Index(i))
 			c.FieldByName(name).SetString(primitive.NewObjectID().Hex())
+			cs = append(cs, c.Interface())
+		}
+	} else {
+		for i := 0; i < sind.Len(); i++ {
+			c := reflect.Indirect(sind.Index(i))
 			cs = append(cs, c.Interface())
 		}
 	}
@@ -346,7 +350,14 @@ func (d *dbBaseMongo) Update(q dbQuerier, mi *modelInfo, ind reflect.Value, tz *
 
 	// Do something without content
 	data, err := col.UpdateOne(todo, filter, update, opt)
-	id = data.UpsertedID
+	if err != nil {
+		return
+	}
+	if data.MatchedCount <= 0 {
+		err = ErrNoDocuments
+		return
+	}
+	id = val
 	return
 }
 

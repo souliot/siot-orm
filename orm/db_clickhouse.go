@@ -457,6 +457,11 @@ func (d *dbBaseClickHouse) DeleteBatch(q dbQuerier, qs *querySet, mi *modelInfo,
 	query = fmt.Sprintf("ALTER TABLE %s%s%s DELETE WHERE %s%s%s %s", Q, mi.table, Q, Q, mi.fields.pk.column, Q, sqlIn)
 
 	d.ins.ReplaceMarks(&query)
+	if qs != nil && qs.forContext {
+		_, err = q.ExecContext(qs.ctx, query, args...)
+	} else {
+		_, err = q.Exec(query, args...)
+	}
 
 	num, err := d.Count(q, qs, mi, cond, tz)
 	if err != nil {
@@ -538,12 +543,13 @@ func (d *dbBaseClickHouse) InsertOne(q dbQuerier, mi *modelInfo, ind reflect.Val
 	if err != nil {
 		return 0, err
 	}
-
+	q.Begin()
 	id, err = d.InsertValue(q, mi, false, names, values)
 	if err != nil {
+		q.Rollback()
 		return 0, err
 	}
-
+	q.Commit()
 	if len(autoFields) > 0 {
 		err = d.setval(q, mi, autoFields)
 	}
@@ -569,7 +575,7 @@ func (d *dbBaseClickHouse) InsertMulti(q dbQuerier, mi *modelInfo, sind reflect.
 	}
 
 	length, autoFields := sind.Len(), make([]string, 0, 1)
-
+	q.Begin()
 	for i := 1; i <= length; i++ {
 
 		ind := reflect.Indirect(sind.Index(i - 1))
@@ -605,13 +611,14 @@ func (d *dbBaseClickHouse) InsertMulti(q dbQuerier, mi *modelInfo, sind reflect.
 		if i > 1 && i%bulk == 0 || length == i {
 			num, err := d.InsertValue(q, mi, true, names, values[:nums])
 			if err != nil {
+				q.Rollback()
 				return cnt, err
 			}
 			cnt += num
 			nums = 0
 		}
 	}
-
+	q.Commit()
 	if len(autoFields) > 0 {
 		err = d.setval(q, mi, autoFields)
 	}
@@ -642,9 +649,6 @@ func (d *dbBaseClickHouse) InsertValue(q dbQuerier, mi *modelInfo, isMulti bool,
 
 	query := fmt.Sprintf("INSERT INTO %s%s%s (%s%s%s) VALUES (%s)", Q, mi.table, Q, Q, columns, Q, qmarks)
 	d.ReplaceMarks(&query)
-	q.Begin()
-
-	fmt.Println(query)
 
 	if isMulti || !d.HasReturningID(mi, &query) {
 		start := 0
@@ -659,7 +663,7 @@ func (d *dbBaseClickHouse) InsertValue(q dbQuerier, mi *modelInfo, isMulti bool,
 			}
 		}
 	}
-	q.Commit()
+
 	return cnt, err
 }
 
@@ -813,4 +817,174 @@ func (d *dbBaseClickHouse) deleteRels(q dbQuerier, mi *modelInfo, args []interfa
 // get indexview.
 func (d *dbBaseClickHouse) Indexes(qs *querySet, mi *modelInfo, tz *time.Location) (iv IndexViewer) {
 	return
+}
+
+// query sql, read values , save to *[]ParamList.
+func (d *dbBaseClickHouse) ReadValues(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condition, exprs []string, container interface{}, tz *time.Location) (int64, error) {
+
+	var (
+		maps  []Params
+		lists []ParamsList
+		list  ParamsList
+	)
+
+	typ := 0
+	switch v := container.(type) {
+	case *[]Params:
+		d := *v
+		if len(d) == 0 {
+			maps = d
+		}
+		typ = 1
+	case *[]ParamsList:
+		d := *v
+		if len(d) == 0 {
+			lists = d
+		}
+		typ = 2
+	case *ParamsList:
+		d := *v
+		if len(d) == 0 {
+			list = d
+		}
+		typ = 3
+	default:
+		panic(fmt.Errorf("unsupport read values type `%T`", container))
+	}
+
+	tables := newDbTables(mi, d.ins)
+
+	var (
+		cols  []string
+		infos []*fieldInfo
+	)
+
+	hasExprs := len(exprs) > 0
+
+	Q := d.ins.TableQuote()
+
+	if hasExprs {
+		cols = make([]string, 0, len(exprs))
+		infos = make([]*fieldInfo, 0, len(exprs))
+		for _, ex := range exprs {
+			index, name, fi, suc := tables.parseExprs(mi, strings.Split(ex, ExprSep))
+			if !suc {
+				panic(fmt.Errorf("unknown field/column name `%s`", ex))
+			}
+			cols = append(cols, fmt.Sprintf("%s.%s%s%s %s%s%s", index, Q, fi.column, Q, Q, name, Q))
+			infos = append(infos, fi)
+		}
+	} else {
+		cols = make([]string, 0, len(mi.fields.dbcols))
+		infos = make([]*fieldInfo, 0, len(exprs))
+		for _, fi := range mi.fields.fieldsDB {
+			cols = append(cols, fmt.Sprintf("T0.%s%s%s %s%s%s", Q, fi.column, Q, Q, fi.name, Q))
+			infos = append(infos, fi)
+		}
+	}
+
+	where, args := tables.getCondSQL(cond, false, tz)
+	groupBy := tables.getGroupSQL(qs.groups)
+	orderBy := tables.getOrderSQL(qs.orders)
+	limit := tables.getLimitSQL(mi, qs.offset, qs.limit)
+	join := tables.getJoinSQL()
+
+	sels := strings.Join(cols, ", ")
+
+	sqlSelect := "SELECT"
+	if qs.distinct {
+		sqlSelect += " DISTINCT"
+	}
+	query := fmt.Sprintf("%s %s FROM %s%s%s T0 %s%s%s%s%s", sqlSelect, sels, Q, mi.table, Q, join, where, groupBy, orderBy, limit)
+
+	d.ins.ReplaceMarks(&query)
+
+	rs, err := q.Query(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	refs := make([]interface{}, len(cols))
+	for i := range refs {
+		var ref interface{}
+		refs[i] = &ref
+	}
+
+	defer rs.Close()
+
+	var (
+		cnt     int64
+		columns []string
+	)
+	for rs.Next() {
+		if cnt == 0 {
+			cols, err := rs.Columns()
+			if err != nil {
+				return 0, err
+			}
+			columns = cols
+		}
+
+		if err := rs.Scan(refs...); err != nil {
+			return 0, err
+		}
+
+		switch typ {
+		case 1:
+			params := make(Params, len(cols))
+			for i, ref := range refs {
+				fi := infos[i]
+
+				val := reflect.Indirect(reflect.ValueOf(ref)).Interface()
+
+				value, err := d.convertValueFromDB(fi, val, tz)
+				if err != nil {
+					panic(fmt.Errorf("db value convert failed `%v` %s", val, err.Error()))
+				}
+
+				params[columns[i]] = value
+			}
+			maps = append(maps, params)
+		case 2:
+			params := make(ParamsList, 0, len(cols))
+			for i, ref := range refs {
+				fi := infos[i]
+
+				val := reflect.Indirect(reflect.ValueOf(ref)).Interface()
+
+				value, err := d.convertValueFromDB(fi, val, tz)
+				if err != nil {
+					panic(fmt.Errorf("db value convert failed `%v` %s", val, err.Error()))
+				}
+
+				params = append(params, value)
+			}
+			lists = append(lists, params)
+		case 3:
+			for i, ref := range refs {
+				fi := infos[i]
+
+				val := reflect.Indirect(reflect.ValueOf(ref)).Interface()
+
+				value, err := d.convertValueFromDB(fi, val, tz)
+				if err != nil {
+					panic(fmt.Errorf("db value convert failed `%v` %s", val, err.Error()))
+				}
+
+				list = append(list, value)
+			}
+		}
+
+		cnt++
+	}
+
+	switch v := container.(type) {
+	case *[]Params:
+		*v = maps
+	case *[]ParamsList:
+		*v = lists
+	case *ParamsList:
+		*v = list
+	}
+
+	return cnt, nil
 }
