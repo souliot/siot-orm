@@ -414,53 +414,18 @@ func (d *dbBaseClickHouse) DeleteBatch(q dbQuerier, qs *querySet, mi *modelInfo,
 	Q := d.ins.TableQuote()
 
 	where, args := tables.getCondSQL(cond, false, tz)
-	join := tables.getJoinSQL()
+	where = strings.ReplaceAll(where, "T0.", "")
 
-	cols := fmt.Sprintf("T0.%s%s%s", Q, mi.fields.pk.column, Q)
-	query := fmt.Sprintf("SELECT %s FROM %s%s%s T0 %s%s", cols, Q, mi.table, Q, join, where)
-
-	d.ins.ReplaceMarks(&query)
-
-	var rs *sql.Rows
-	r, err := q.Query(query, args...)
-	if err != nil {
-		return 0, err
-	}
-	rs = r
-	defer rs.Close()
-
-	var ref interface{}
-	args = make([]interface{}, 0)
-	cnt := 0
-	for rs.Next() {
-		if err := rs.Scan(&ref); err != nil {
-			return 0, err
-		}
-		pkValue, err := d.convertValueFromDB(mi.fields.pk, reflect.ValueOf(ref).Interface(), tz)
-		if err != nil {
-			return 0, err
-		}
-		args = append(args, pkValue)
-		cnt++
-	}
-
-	if cnt == 0 {
-		return 0, nil
-	}
-
-	marks := make([]string, len(args))
-	for i := range marks {
-		marks[i] = "?"
-	}
-	sqlIn := fmt.Sprintf("IN (%s)", strings.Join(marks, ", "))
-	// query = fmt.Sprintf("DELETE FROM %s%s%s WHERE %s%s%s %s", Q, mi.table, Q, Q, mi.fields.pk.column, Q, sqlIn)
-	query = fmt.Sprintf("ALTER TABLE %s%s%s DELETE WHERE %s%s%s %s", Q, mi.table, Q, Q, mi.fields.pk.column, Q, sqlIn)
+	query := fmt.Sprintf("ALTER TABLE %s%s%s DELETE %s", Q, mi.table, Q, where)
 
 	d.ins.ReplaceMarks(&query)
 	if qs != nil && qs.forContext {
 		_, err = q.ExecContext(qs.ctx, query, args...)
 	} else {
 		_, err = q.Exec(query, args...)
+	}
+	if err != nil {
+		return
 	}
 
 	num, err := d.Count(q, qs, mi, cond, tz)
