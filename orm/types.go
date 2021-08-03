@@ -46,6 +46,8 @@ type Ormer interface {
 	Rollback() error
 	Using(string) error
 
+	RawDB() interface{}
+
 	Raw(query string, args ...interface{}) RawSeter
 }
 

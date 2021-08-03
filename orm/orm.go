@@ -68,6 +68,14 @@ func (o *orm) getMiInd(md interface{}, needPtr bool) (mi *modelInfo, ind reflect
 	panic(fmt.Errorf("<Ormer> table: `%s` not found, make sure it was registered with `RegisterModel()`", name))
 }
 
+func (o *orm) RawDB() interface{} {
+	if o.alias.Driver == DRMongo {
+		return o.alias.DB.MDB
+	} else {
+		return o.alias.DB.DB
+	}
+}
+
 // read data to model
 func (o *orm) Read(md interface{}, cols ...string) (err error) {
 	mi, ind := o.getMiInd(md, true)

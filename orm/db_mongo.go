@@ -1,6 +1,7 @@
 package orm
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"time"
@@ -90,6 +91,26 @@ func (d *dbBaseMongo) Distinct(q dbQuerier, qs *querySet, mi *modelInfo, cond *C
 func (d *dbBaseMongo) ReadBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condition, container interface{}, tz *time.Location, cols []string) (err error) {
 	db := qs.orm.db.(*DB).MDB
 	col := db.Collection(mi.table)
+	cur := &mongo.Cursor{}
+
+	if len(qs.groups) > 0 {
+		opt := options.Aggregate()
+		aggre := convertAggre(qs.groups, qs.cond, qs.orders)
+		fmt.Println(aggre)
+		if qs != nil && qs.forContext {
+			// Do something with content
+			cur, err = col.Aggregate(qs.ctx, aggre, opt)
+		} else {
+			// Do something without content
+			cur, err = col.Aggregate(todo, aggre, opt)
+		}
+		// defer cur.Close(todo)
+		if err != nil {
+			return
+		}
+		err = cur.All(todo, container)
+		return
+	}
 
 	opt := options.Find()
 	if len(cols) > 0 {
@@ -113,7 +134,6 @@ func (d *dbBaseMongo) ReadBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *
 	}
 
 	filter := convertCondition(cond)
-	cur := &mongo.Cursor{}
 	if qs != nil && qs.forContext {
 		// Do something with content
 		cur, err = col.Find(qs.ctx, filter, opt)
@@ -125,6 +145,7 @@ func (d *dbBaseMongo) ReadBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *
 	if err != nil {
 		return
 	}
+
 	err = cur.All(todo, container)
 
 	return
@@ -504,5 +525,83 @@ func getSort(orders []string) (r bson.M) {
 		}
 	}
 
+	return
+}
+func getGroup(groups []string) (r bson.M) {
+	r = bson.M{}
+	if len(groups) == 0 {
+		return
+	}
+	operator := bson.M{
+		"$sum": 1,
+	}
+
+	setOP := false
+	if len(groups) == 1 {
+		gs := strings.Split(groups[0], "__")
+		if len(gs) == 2 {
+			operator = bson.M{
+				"$" + gs[1]: 1,
+			}
+		} else if len(gs) > 2 {
+			operator = bson.M{
+				"$" + gs[1]: "$" + gs[2],
+			}
+		}
+		r["_id"] = "$" + gs[0]
+		r["data"] = operator
+		return
+	}
+
+	ids := bson.M{}
+	for _, group := range groups {
+		gs := strings.Split(group, "__")
+		if !setOP {
+			if len(gs) == 2 {
+				operator = bson.M{
+					"$" + gs[1]: 1,
+				}
+			} else if len(gs) > 2 {
+				operator = bson.M{
+					"$" + gs[1]: "$" + gs[2],
+				}
+			}
+		}
+		ids[gs[0]] = "$" + gs[0]
+	}
+	r["_id"] = ids
+	r["data"] = operator
+	return
+}
+
+func convertAggre(groups []string, cond *Condition, orders []string) (aggre []bson.D) {
+	filter := convertCondition(cond)
+	sort := getSort(orders)
+	aggre = make([]bson.D, 0)
+
+	if len(filter) > 0 {
+		aggre = append(aggre, bson.D{
+			bson.E{
+				Key:   "$match",
+				Value: filter,
+			},
+		})
+	}
+	if len(sort) > 0 {
+		aggre = append(aggre, bson.D{
+			bson.E{
+				Key:   "$sort",
+				Value: sort,
+			},
+		})
+	}
+	group := getGroup(groups)
+
+	aggre = append(aggre, bson.D{
+		bson.E{
+			Key:   "$group",
+			Value: group,
+		},
+	})
 	return
 }

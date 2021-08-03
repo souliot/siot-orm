@@ -675,8 +675,9 @@ setValue:
 		}
 	case fieldType == TypeSlice:
 		if value != nil {
-			v := value.([]byte)
-			field.SetBytes(v)
+			// v := value.([]byte)
+			// field.SetBytes(v)
+			field.Set(reflect.ValueOf(value))
 		}
 	case fieldType&IsRelField > 0:
 		if value != nil {
