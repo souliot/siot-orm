@@ -494,7 +494,7 @@ func convertCondition(cond *Condition) (filter bson.M) {
 	return
 }
 
-func getCond(params []string, args []interface{}, operator string) (k string, v interface{}) {
+func getCond(params []string, args []interface{}, operator string) (k string, v bson.M) {
 	k = strings.Join(params, ".")
 	if len(args) == 0 {
 		v = bson.M{}
@@ -507,7 +507,9 @@ func getCond(params []string, args []interface{}, operator string) (k string, v 
 			"$" + operator: args,
 		}
 	}
-
+	if operator == "regex" {
+		v["$options"] = "i"
+	}
 	return
 }
 
