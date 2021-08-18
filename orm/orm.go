@@ -98,6 +98,8 @@ func (o *orm) ReadOrCreate(md interface{}, col1 string, cols ...string) (created
 		id = int64(vid.Uint())
 	} else if mi.fields.pk.rel {
 		return o.ReadOrCreate(vid.Interface(), mi.fields.pk.relModelInfo.fields.pk.name)
+	} else {
+		id = vid.Interface()
 	}
 
 	return false, id, err
