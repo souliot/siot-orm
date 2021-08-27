@@ -61,6 +61,9 @@ func addModelFields(mi *modelInfo, ind reflect.Value, mName string, index []int)
 		if sf.PkgPath != "" {
 			continue
 		}
+		if sf.Tag.Get("orm") == "-" {
+			continue
+		}
 		// add anonymous struct fields
 		if sf.Anonymous {
 			addModelFields(mi, field, mName+"."+sf.Name, append(index, i))
