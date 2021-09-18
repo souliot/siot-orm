@@ -1,7 +1,6 @@
 package orm
 
 import (
-	"fmt"
 	"reflect"
 	"strings"
 	"time"
@@ -96,7 +95,6 @@ func (d *dbBaseMongo) ReadBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *
 	if len(qs.groups) > 0 {
 		opt := options.Aggregate()
 		aggre := convertAggre(qs.groups, qs.cond, qs.orders)
-		fmt.Println(aggre)
 		if qs != nil && qs.forContext {
 			// Do something with content
 			cur, err = col.Aggregate(qs.ctx, aggre, opt)
@@ -507,6 +505,7 @@ func getCond(params []string, args []interface{}, operator string) (k string, v 
 			"$" + operator: args,
 		}
 	}
+
 	if operator == "regex" {
 		v["$options"] = "i"
 	}

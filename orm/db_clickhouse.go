@@ -347,18 +347,14 @@ func (d *dbBaseClickHouse) UpdateBatch(q dbQuerier, qs *querySet, mi *modelInfo,
 
 	join := tables.getJoinSQL()
 
-	var query, T string
+	var query string
 
 	Q := d.ins.TableQuote()
-
-	if d.ins.SupportUpdateJoin() {
-		T = "T0."
-	}
 
 	cols := make([]string, 0, len(columns))
 
 	for i, v := range columns {
-		col := fmt.Sprintf("%s%s%s%s", T, Q, v, Q)
+		col := fmt.Sprintf("%s%s%s", Q, v, Q)
 		if c, ok := values[i].(colValue); ok {
 			switch c.opt {
 			case ColAdd:
@@ -378,24 +374,23 @@ func (d *dbBaseClickHouse) UpdateBatch(q dbQuerier, qs *querySet, mi *modelInfo,
 
 	sets := strings.Join(cols, ", ") + " "
 
-	if d.ins.SupportUpdateJoin() {
-		query = fmt.Sprintf("UPDATE %s%s%s T0 %sSET %s%s", Q, mi.table, Q, join, sets, where)
-	} else {
-		supQuery := fmt.Sprintf("SELECT T0.%s%s%s FROM %s%s%s T0 %s%s", Q, mi.fields.pk.column, Q, Q, mi.table, Q, join, where)
-		query = fmt.Sprintf("UPDATE %s%s%s SET %sWHERE %s%s%s IN ( %s )", Q, mi.table, Q, sets, Q, mi.fields.pk.column, Q, supQuery)
-	}
+	where = strings.ReplaceAll(where, "T0.", "")
+
+	query = fmt.Sprintf("ALTER TABLE %s%s%s UPDATE %s %s%s", Q, mi.table, Q, join, sets, where)
 
 	d.ins.ReplaceMarks(&query)
-	var res sql.Result
+
+	i, err = d.Count(q, qs, mi, cond, tz)
+	if err != nil {
+		return 0, err
+	}
+
 	if qs != nil && qs.forContext {
-		res, err = q.ExecContext(qs.ctx, query, values...)
+		_, err = q.ExecContext(qs.ctx, query, values...)
 	} else {
-		res, err = q.Exec(query, values...)
+		_, err = q.Exec(query, values...)
 	}
-	if err == nil {
-		return res.RowsAffected()
-	}
-	return 0, err
+	return
 }
 
 // delete the recodes.
